@@ -25,11 +25,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: agentbridge-npm-tarball
-          path: packaging/npm/out/agentbridge-*.tgz
+          path: packaging/npm/out/musi27-agentbridge-*.tgz
       - name: GitHub release draft with the tarball (no npm publish)
         if: startsWith(github.ref, 'refs/tags/v')
         env: { GH_TOKEN: '${{ github.token }}' }
         run: |
-          gh release create "${GITHUB_REF_NAME}" packaging/npm/out/agentbridge-*.tgz --draft \
+          gh release create "${GITHUB_REF_NAME}" packaging/npm/out/musi27-agentbridge-*.tgz --draft \
             --title "agentbridge ${GITHUB_REF_NAME}" \
-            --notes "npm tarball verified in CI. Publish it with npm publish agentbridge-${GITHUB_REF_NAME#v}.tgz --access public (see docs/releasing.md)."
+            --notes "npm tarball verified in CI. Publish it with npm publish musi27-agentbridge-${GITHUB_REF_NAME#v}.tgz --access public (see docs/releasing.md)."

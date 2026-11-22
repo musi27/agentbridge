@@ -1,7 +1,7 @@
 // Verifies a packed agentbridge tarball the way a user gets it: `npm install -g` into a temp prefix (no registry
 // access needed: the package has no dependencies), then `agentbridge help`, `agentbridge doctor` without a bridge, the
 // helper, the plugin + marketplace layout, and that no `@agentbridge/*` import survived bundling.
-// Usage: node packaging/npm/scripts/verify.ts <agentbridge-x.y.z.tgz>   (exit 1 on any failure)
+// Usage: node packaging/npm/scripts/verify.ts <musi27-agentbridge-x.y.z.tgz>   (exit 1 on any failure)
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,7 +23,7 @@ export function verifyTarball(tgz: string): VerifyResult {
     const inst = spawnSync('npm', ['install', '-g', '--prefix', prefix, '--no-audit', '--no-fund', resolve(tgz)], { encoding: 'utf8' });
     add('install', inst.status === 0, inst.status === 0 ? `installed into ${prefix}` : (inst.stderr || inst.stdout).slice(0, 400));
     if (inst.status !== 0) return { ok: false, checks };
-    const pkg = join(prefix, 'lib', 'node_modules', 'agentbridge');
+    const pkg = join(prefix, 'lib', 'node_modules', '@musi27', 'agentbridge');
     const bin = join(prefix, 'bin', 'agentbridge');
     const env = { ...process.env, CLAUDE_CONFIG_DIR: join(home, 'claude'), AGENTBRIDGE_HOME: join(home, 'ab') };
 
@@ -90,7 +90,7 @@ export function verifyTarball(tgz: string): VerifyResult {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const tgz = process.argv[2];
-  if (!tgz) { console.error('usage: verify.ts <agentbridge-x.y.z.tgz>'); process.exit(2); }
+  if (!tgz) { console.error('usage: verify.ts <musi27-agentbridge-x.y.z.tgz>'); process.exit(2); }
   const r = verifyTarball(tgz);
   for (const c of r.checks) console.log(`${c.ok ? 'ok  ' : 'FAIL'} ${c.id}: ${c.detail}`);
   process.exit(r.ok ? 0 : 1);

@@ -104,7 +104,7 @@ Grok then reports the answer in your Grok chat.
 ## Install and first try
 
 ```bash
-npm install -g agentbridge
+npm install -g @musi27/agentbridge
 ```
 
 ```bash

@@ -12,7 +12,7 @@ cloud, reach it.
 Requirements: macOS 13+, Node.js 24+, Claude Code 2.1.330+.
 
 ```bash
-npm install -g agentbridge
+npm install -g @musi27/agentbridge
 agentbridge init
 ```
 

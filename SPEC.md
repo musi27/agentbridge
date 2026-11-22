@@ -957,7 +957,7 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
 
 ### 14.1 Install and `init`
 
-**Install:** `npm install -g agentbridge`. `npx agentbridge init` only bootstraps a global or `~/.agentbridge/app` install. Node LTS (minimum fixed at M1).
+**Install:** `npm install -g @musi27/agentbridge` (npm refused the unscoped name as too similar to `agent-bridge`; the command is still `agentbridge`). `npx @musi27/agentbridge init` only bootstraps a global or `~/.agentbridge/app` install. Node LTS (minimum fixed at M1).
 
 **`init` steps:**
 1. Detect Claude Code (≥ 2.1.330) and check requirements (§11.2). Install the plugin. Write the deny rules. Check the effective `crossSessionInbound` (must not be `hold`/`refuse`).

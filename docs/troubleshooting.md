@@ -191,7 +191,7 @@ macOS account password**. You don't need Touch ID hardware; the password dialog 
 | Authentication failed | The fingerprint or password wasn't accepted | Run the command again. |
 | Cancelled by the system | macOS interrupted the dialog, for example by locking the screen or switching users | Unlock and run the command again. |
 | Not available | LocalAuthentication can't run on this Mac or in this context | Check that your account has a login password, then run `agentbridge doctor`. |
-| Helper missing | The Touch ID helper (`agentbridge-helper`) wasn't found | The npm package ships it prebuilt; reinstall with `npm install -g agentbridge`. From source, build it with `npm run build:helper -w @agentbridge/presence`. Then run `agentbridge doctor`. |
+| Helper missing | The Touch ID helper (`agentbridge-helper`) wasn't found | The npm package ships it prebuilt; reinstall with `npm install -g @musi27/agentbridge`. From source, build it with `npm run build:helper -w @agentbridge/presence`. Then run `agentbridge doctor`. |
 
 Without a working presence check, the bridge refuses privileged commands. Conversations keep working.
 

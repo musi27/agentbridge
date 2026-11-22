@@ -33,16 +33,16 @@ contents summary.
 1. Bump `version` in `packaging/npm/package.json` (and `BRIDGE_VERSION` in `packages/bridge/src/core/engine.ts`).
 2. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`. The [release workflow](../.github/workflows/release.yml)
    runs `npm ci`, `npm run check`, builds the helper fresh (universal, ad-hoc), builds and verifies the package, and
-   creates a **draft** GitHub release with `agentbridge-0.1.0.tgz` attached. (Manual runs from the Actions tab build
+   creates a **draft** GitHub release with `musi27-agentbridge-0.1.0.tgz` attached. (Manual runs from the Actions tab build
    and verify the tarball and upload it as a workflow artifact.)
 3. Download the tarball from the draft release and, optionally, verify it again on your Mac:
-   `node packaging/npm/scripts/verify.ts agentbridge-0.1.0.tgz`.
+   `node packaging/npm/scripts/verify.ts musi27-agentbridge-0.1.0.tgz`.
 
 ## Publish (owner only)
 
 ```bash
 npm login
-npm publish agentbridge-0.1.0.tgz --access public
+npm publish musi27-agentbridge-0.1.0.tgz --access public
 ```
 
 Then publish the GitHub release draft. Publishing the exact tarball CI verified (rather than running `npm publish` in a
