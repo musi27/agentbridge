@@ -1,0 +1,11 @@
+{
+  "name": "@agentbridge/adapter-grok",
+  "version": "0.1.0",
+  "private": true,
+  "description": "agentbridge Grok Bot adapter: thin webhook deliveries, results mapping, per-bot cap, doctor (SPEC v0.4 §12)",
+  "type": "module",
+  "exports": { ".": { "agentbridge-source": "./src/index.ts", "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
+  "engines": { "node": ">=24" },
+  "dependencies": { "@agentbridge/protocol": "0.4.0" }
+}

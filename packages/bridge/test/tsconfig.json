@@ -1,0 +1,31 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "outDir": "../dist/test-build"
+  },
+  "include": [
+    ".",
+    "../src"
+  ],
+  "references": [
+    {
+      "path": "../../protocol"
+    },
+    {
+      "path": "../../presence"
+    },
+    {
+      "path": "../../../adapters/claude-code"
+    },
+    {
+      "path": "../../../adapters/fake"
+    },
+    {
+      "path": "../../../adapters/grok-bot"
+    },
+    {
+      "path": "../../relay"
+    }
+  ]
+}

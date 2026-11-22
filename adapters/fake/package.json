@@ -1,0 +1,10 @@
+{
+  "name": "@agentbridge/adapter-fake",
+  "version": "0.1.0",
+  "private": true,
+  "description": "In-memory agentbridge adapter for tests (SPEC §4.1, §11.1)",
+  "type": "module",
+  "exports": { ".": { "agentbridge-source": "./src/index.ts", "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
+  "dependencies": { "@agentbridge/protocol": "0.4.0" }
+}

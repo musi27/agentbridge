@@ -1,0 +1,24 @@
+{
+  "name": "agentbridge-monorepo",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "packages/*",
+    "adapters/*"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "test": "node --conditions=agentbridge-source --test --test-reporter=spec \"packages/*/test/**/*.test.ts\" \"adapters/*/test/**/*.test.ts\"",
+    "check": "npm run typecheck && npm test && npm run check:links",
+    "check:links": "node scripts/check-links.mjs && node scripts/check-links.mjs --product",
+    "pack:release": "node --conditions=agentbridge-source packaging/npm/scripts/release.ts"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "@types/node": "26.6.6"
+  }
+}

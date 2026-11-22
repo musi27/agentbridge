@@ -1,0 +1,28 @@
+{
+  "name": "@agentbridge/relay",
+  "version": "0.4.0",
+  "private": true,
+  "description": "agentbridge relay (SPEC v0.4 §13): Grok MCP endpoint, bridge WebSocket, Redis stream; plus the bridge-side relay client",
+  "type": "module",
+  "exports": {
+    ".": { "agentbridge-source": "./src/index.ts", "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" },
+    "./client": { "agentbridge-source": "./src/client.ts", "types": "./dist/src/client.d.ts", "default": "./dist/src/client.js" }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build:vercel": "node --conditions=agentbridge-source scripts/build-vercel.ts",
+    "dev": "node --conditions=agentbridge-source scripts/dev-server.ts",
+    "smoke": "node --conditions=agentbridge-source scripts/smoke.ts"
+  },
+  "dependencies": {
+    "@agentbridge/protocol": "0.4.0",
+    "ioredis": "6.0.0",
+    "libsodium-wrappers": "0.8.4",
+    "ws": "8.22.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.2",
+    "esbuild": "0.28.2"
+  }
+}

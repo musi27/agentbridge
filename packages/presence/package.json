@@ -1,0 +1,15 @@
+{
+  "name": "@agentbridge/presence",
+  "version": "0.4.0",
+  "private": true,
+  "description": "agentbridge macOS platform layer: LocalAuthentication presence check, Keychain secrets, notifications, launchd service (SPEC §9.1, §9.2, §14.1, §15.5)",
+  "type": "module",
+  "os": ["darwin"],
+  "exports": { ".": { "agentbridge-source": "./src/index.ts", "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist", "bin", "native"],
+  "scripts": {
+    "build:helper": "native/build.sh",
+    "launchd-probe": "node scripts/launchd-probe.ts"
+  },
+  "dependencies": { "@agentbridge/protocol": "0.4.0" }
+}

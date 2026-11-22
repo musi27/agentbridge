@@ -1,0 +1,30 @@
+{
+  "name": "@agentbridge/adapter-claude-code",
+  "version": "0.4.0",
+  "private": true,
+  "description": "agentbridge Claude Code adapter: plugin (MCP server + hooks) and the bridge-side ClaudeCodeAdapter (SPEC v0.4 §11)",
+  "type": "module",
+  "exports": {
+    ".": {
+      "agentbridge-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "plugin"
+  ],
+  "scripts": {
+    "build:plugin": "node scripts/build-plugin.ts",
+    "e2e:claude": "node --conditions=agentbridge-source scripts/e2e-claude.ts"
+  },
+  "dependencies": {
+    "@agentbridge/protocol": "0.4.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

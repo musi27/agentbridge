@@ -1,0 +1,6 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "..", "outDir": "../dist/test-build", "lib": ["es2024"] },
+  "include": [".", "../src", "../scripts"],
+  "references": [{ "path": "../../protocol" }]
+}

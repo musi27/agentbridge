@@ -1,0 +1,35 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  package:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npm run check
+      - name: Build the helper fresh (universal, ad-hoc signed)
+        run: rm -f packages/presence/bin/agentbridge-helper && npm run build:helper -w @agentbridge/presence
+      - name: Build, pack and verify the npm package
+        run: npm run pack:release
+      - name: Tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          test "v$(node -p "require('./packaging/npm/package.json').version")" = "${GITHUB_REF_NAME}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agentbridge-npm-tarball
+          path: packaging/npm/out/agentbridge-*.tgz
+      - name: GitHub release draft with the tarball (no npm publish)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          gh release create "${GITHUB_REF_NAME}" packaging/npm/out/agentbridge-*.tgz --draft \
+            --title "agentbridge ${GITHUB_REF_NAME}" \
+            --notes "npm tarball verified in CI. Publish it with npm publish agentbridge-${GITHUB_REF_NAME#v}.tgz --access public (see docs/releasing.md)."

@@ -1,0 +1,12 @@
+{
+  "name": "agentbridge",
+  "owner": { "name": "agentbridge" },
+  "metadata": { "description": "agentbridge plugins for Claude Code" },
+  "plugins": [
+    {
+      "name": "agentbridge",
+      "source": "./adapters/claude-code/plugin",
+      "description": "Human-approved conversations between your Claude Code sessions and other agents, through the local agentbridge bridge."
+    }
+  ]
+}

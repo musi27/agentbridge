@@ -1,0 +1,6 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "..", "outDir": "../dist/test-build" },
+  "include": [".", "../src"],
+  "references": [{ "path": "../../../packages/protocol" }]
+}

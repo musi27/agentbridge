@@ -1,0 +1,10 @@
+{
+  "description": "agentbridge: report session lifecycle and permission mode to the local bridge (never blocks; < 1 s).",
+  "hooks": {
+    "SessionStart": [ { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/runtime/hook.mjs\"", "timeout": 3 } ] } ],
+    "SessionEnd": [ { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/runtime/hook.mjs\"", "timeout": 3 } ] } ],
+    "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/runtime/hook.mjs\"", "timeout": 3 } ] } ],
+    "PreToolUse": [ { "matcher": "mcp__plugin_agentbridge_.*", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/runtime/hook.mjs\"", "timeout": 3 } ] } ],
+    "Stop": [ { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/runtime/hook.mjs\"", "timeout": 3 } ] } ]
+  }
+}

@@ -1,0 +1,25 @@
+// Entry point of the plugin hooks (bundled to plugin/runtime/hook.mjs). Always exits 0.
+import { runHook } from './hook.ts';
+
+// AGENTBRIDGE_HOOK_TIMING=1: report on stderr at exit how long the hook's own code ran (from this module starting to
+// exit) and how long Node took to boot before that. Tests check the former against the < 1 s budget: Node's start-up
+// is outside the hook's control and can take seconds on a heavily loaded machine.
+const started = performance.now();
+const timing = process.env.AGENTBRIDGE_HOOK_TIMING === '1';
+const exit = (): never => {
+  if (timing) process.stderr.write(`agentbridge-hook-ms=${Math.round(performance.now() - started)} boot-ms=${Math.round(started)}\n`);
+  process.exit(0);
+};
+
+const hardStop = setTimeout(exit, 900); // never hold Claude Code up, whatever happens
+let stdin = '';
+try {
+  process.stdin.setEncoding('utf8');
+  for await (const chunk of process.stdin) stdin += chunk as string;
+  const out = await runHook(stdin);
+  if (out) process.stdout.write(out + '\n');
+} catch {
+  // swallow: hooks must not fail the session
+}
+clearTimeout(hardStop);
+exit();

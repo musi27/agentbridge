@@ -1,0 +1,15 @@
+{
+  "name": "agentbridge",
+  "version": "0.1.0",
+  "description": "Human-approved two-way conversations between your Claude Code sessions and your Grok Bot (macOS).",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "agentbridge": "dist/cli.mjs" },
+  "engines": { "node": ">=24" },
+  "os": ["darwin"],
+  "files": ["dist", "bin", "plugin", ".claude-plugin", "README.md", "LICENSE"],
+  "keywords": ["claude-code", "grok", "agents", "mcp", "cli"],
+  "homepage": "https://github.com/musi27/agentbridge#readme",
+  "repository": { "type": "git", "url": "git+https://github.com/musi27/agentbridge.git" },
+  "bugs": { "url": "https://github.com/musi27/agentbridge/issues" }
+}

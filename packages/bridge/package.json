@@ -1,0 +1,34 @@
+{
+  "name": "@agentbridge/bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "agentbridge bridge service core: storage, conversation engine, approvals, policy, IPC, delivery, CLI (SPEC v0.4)",
+  "type": "module",
+  "bin": {
+    "agentbridge": "./dist/cli/main.js"
+  },
+  "exports": {
+    ".": {
+      "agentbridge-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@agentbridge/adapter-claude-code": "0.4.0",
+    "@agentbridge/adapter-grok": "0.1.0",
+    "@agentbridge/presence": "0.4.0",
+    "@agentbridge/protocol": "0.4.0",
+    "@agentbridge/relay": "0.4.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@agentbridge/adapter-fake": "0.1.0"
+  }
+}
