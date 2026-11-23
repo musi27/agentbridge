@@ -40,7 +40,7 @@ class Conn {
 
   constructor(socket: Socket, srv: IpcServer) {
     this.socket = socket; this.srv = srv;
-    this.link = { deliver: (items) => this.deliver(items) };
+    this.link = { deliver: (items, opts) => this.deliver(items, opts) };
     socket.setEncoding('utf8');
     socket.on('data', (d: string) => this.onData(d));
     socket.on('close', () => this.onClose());
@@ -93,14 +93,14 @@ class Conn {
   }
 
   /** ParticipantLink: send the deliver event and wait for every post_result. */
-  private deliver(items: Array<{ post_id: string; text: string }>): Promise<Array<{ post_id: string; ok: boolean; error?: string }>> {
+  private deliver(items: Array<{ post_id: string; text: string }>, opts: { thread_id?: string } = {}): Promise<Array<{ post_id: string; ok: boolean; error?: string }>> {
     if (this.closed) return Promise.reject(new Error('connection closed'));
     const waits = items.map((it) => new Promise<{ post_id: string; ok: boolean; error?: string }>((resolve) => {
       const t = setTimeout(() => { this.pending.delete(it.post_id); resolve({ post_id: it.post_id, ok: false, error: 'timeout waiting for post_result' }); }, this.srv.opts.postTimeoutMs ?? 30_000);
       t.unref?.();
       this.pending.set(it.post_id, { resolve: (r) => { clearTimeout(t); resolve(r); } });
     }));
-    this.send({ type: 'evt', method: 'deliver', params: { items } });
+    this.send({ type: 'evt', method: 'deliver', params: { items, ...(opts.thread_id ? { thread_id: opts.thread_id } : {}) } });
     return new Promise((resolve, reject) => {
       const onClose = (): void => reject(new Error('connection closed'));
       this.socket.once('close', onClose);
@@ -187,6 +187,11 @@ export class IpcServer {
       if (!p.success) return e('invalid_message', 'invalid session_event');
       if (!(await this.childOf(c, p.data.claude_pid))) return e('unauthenticated', 'caller is not a child of claude_pid');
       engine.sessionEvent(p.data);
+      // Codex has no way to show an MCP server's instructions: the SessionStart hook injects them (§11a)
+      if (p.data.host === 'codex' && p.data.event === 'start') {
+        const context = await engine.standingInstructionFor(p.data.claude_pid);
+        return { result: { ok: true, ...(context ? { context } : {}) } };
+      }
       return { result: { ok: true } };
     }
     if (method === 'register_session' || method === 'reconnect_session') {

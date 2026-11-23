@@ -69,6 +69,10 @@ setting; check those too. Then restart the session. Queued messages are delivere
 the first event that carries it (your first prompt or the first tool call). Until then, deliveries and invites are
 held, not failed, so that agentbridge never delivers into a session that might be in bypass mode.
 
+The sender is told the message is held until someone types in that session. If it is still held after 30 seconds,
+you get a macOS notification ("agentbridge: message waiting"), and `agentbridge status` shows the session as
+`waiting for first prompt`.
+
 **Fix.** Send any prompt in the session. Held items are delivered once the mode is known. If the mode stays `unknown`
 after that, a newer Claude Code version may report a mode name agentbridge doesn't recognise; check `agentbridge doctor`
 and report it.
@@ -270,3 +274,22 @@ yourself:
    ```bash
    npm uninstall -g @musi27/agentbridge
    ```
+
+## Codex: tools work but messages never arrive
+
+**Symptom.** A Codex session can call agentbridge tools, but invites and replies never show up in it, and
+`agentbridge status` shows the `codex:` session as `waiting for first prompt`, or doesn't list it at all.
+
+**Cause.** Codex hasn't run the agentbridge hooks. Codex runs only hooks you've trusted, and without them the bridge
+never learns the Codex session id that `codex queue` needs.
+
+**Fix.** In Codex, run `/hooks` and trust the agentbridge hooks, then start a new session. If you changed agentbridge's
+install location, run `agentbridge add codex` again (the hook command changes, and Codex asks you to trust it again).
+
+## Codex: "Codex auto-review is on" when confirming
+
+**Cause.** The session runs with auto-review (`--approve-for-me` or `approvals_reviewer = "auto_review"`), so a model
+would answer the approval prompt instead of you. agentbridge refuses those approvals.
+
+**Fix.** Approve in a terminal with `agentbridge approve <id>` (the id is in the message), or start Codex without
+auto-review and ask it to confirm again.

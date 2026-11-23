@@ -85,10 +85,10 @@ export function checkInviteLimits(c: InviteCounts, l: InviteLimits, now: number)
 export const COOLDOWN_END_REASONS: readonly EndReason[] = ['declined', 'approval_expired', 'invite_expired'];
 
 // ---------- §5 addressing ----------
-export interface AddressCandidate { id: string; agent: AgentType; name: string; state: string; cwd: string | null }
+export interface AddressCandidate { id: string; agent: AgentType; name: string; state: string; cwd: string | null; title?: string | null }
 export type Resolution =
   | { ok: true; id: string }
-  | { ok: false; reason: 'recipient_gone' | 'recipient_ambiguous' | 'invalid_message'; candidates?: Array<{ address: string; short_id: string; folder?: string }> };
+  | { ok: false; reason: 'recipient_gone' | 'recipient_ambiguous' | 'invalid_message'; candidates?: Array<{ address: string; title?: string; short_id: string; folder?: string }> };
 
 /**
  * Resolve `<agent>:<name>` among known participants. Gone participants are ignored.
@@ -105,7 +105,7 @@ export function resolveAddress(all: readonly AddressCandidate[], address: string
   if (hits.length === 0) return { ok: false, reason: 'recipient_gone' };
   return {
     ok: false, reason: 'recipient_ambiguous',
-    candidates: hits.map((p) => ({ address: `${p.agent}:${p.name}`, short_id: shortId(p.id), ...(opts.local && p.cwd ? { folder: basename(p.cwd) } : {}) })),
+    candidates: hits.map((p) => ({ address: `${p.agent}:${p.name}`, ...(p.title ? { title: p.title } : {}), short_id: shortId(p.id), ...(opts.local && p.cwd ? { folder: basename(p.cwd) } : {}) })),
   };
 }
 

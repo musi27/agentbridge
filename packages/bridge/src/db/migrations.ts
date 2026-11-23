@@ -153,6 +153,13 @@ CREATE TABLE kv (
 );
 `,
   },
+  {
+    version: 3,
+    name: "participant title (Claude Code's session title, shown beside the address)",
+    sql: `
+ALTER TABLE participants ADD COLUMN title TEXT;
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)!.version;

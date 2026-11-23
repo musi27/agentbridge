@@ -6,7 +6,7 @@ const s = (props: Record<string, JsonSchema>, required: string[] = []): JsonSche
 const str = (description: string, extra: JsonSchema = {}): JsonSchema => ({ type: 'string', description, ...extra });
 const int = (description: string, extra: JsonSchema = {}): JsonSchema => ({ type: 'integer', description, ...extra });
 const ULID = { pattern: '^[0-9A-HJKMNP-TV-Z]{26}$' };
-const ADDR = { pattern: '^(claude|grok|fake):[A-Za-z0-9_-]{1,64}$' };
+const ADDR = { pattern: '^(claude|grok|fake|codex):[A-Za-z0-9_-]{1,64}$' };
 const idem = { idempotency_key: str('Optional key to make retries safe', { maxLength: 128 }) };
 
 export const CLAUDE_TOOLS: readonly ToolDef[] = [

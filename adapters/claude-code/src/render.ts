@@ -6,7 +6,7 @@
 import { ULID_RE, escapeNonce } from '@agentbridge/protocol';
 import type { ToolResult } from '@agentbridge/protocol';
 
-const ADDRESS_RE = /^(claude|grok|fake):[A-Za-z0-9_-]{1,64}$/;
+const ADDRESS_RE = /^(claude|grok|fake|codex):[A-Za-z0-9_-]{1,64}$/;
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
 const ENUM_RE = /^[a-z][a-z_]{0,40}$/;
 const SHORT_ID_RE = /^[0-9a-z]{1,16}$/;

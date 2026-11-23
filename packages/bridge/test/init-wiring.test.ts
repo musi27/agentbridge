@@ -46,7 +46,7 @@ test('policy: transport.relay_mode / max_connected_hours_per_day default for row
 
 test('storage: migration 2 adds the kv table', () => {
   const db = openDatabase(':memory:'); const store = new Store(db);
-  assert.equal(schemaVersion(db), 2);
+  assert.ok(schemaVersion(db) >= 2);
   assert.equal(store.kvGet('x'), undefined);
   store.kvSet('x', '1'); store.kvSet('x', '2');
   assert.equal(store.kvGet('x'), '2');

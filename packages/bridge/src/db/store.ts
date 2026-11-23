@@ -5,7 +5,7 @@ import type { Db } from './db.ts';
 export type Inbound = 'accept' | 'hold' | 'refuse';
 
 export interface ParticipantRow {
-  id: string; agent: AgentType; name: string; display_name: string; cwd: string | null; claude_pid: number | null;
+  id: string; agent: AgentType; name: string; display_name: string; title: string | null; cwd: string | null; claude_pid: number | null;
   session_id: string | null; transcript_path: string | null; permission_mode: PermissionMode; inbound: Inbound;
   state: ParticipantState; epoch: number; bot_id: string | null; created_at: number; updated_at: number;
 }
@@ -52,8 +52,8 @@ export class Store {
 
   // ---------- participants ----------
   insertParticipant(p: ParticipantRow): void {
-    this.db.run(`INSERT INTO participants (id, agent, name, display_name, cwd, claude_pid, session_id, transcript_path, permission_mode, inbound, state, epoch, bot_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.id, p.agent, p.name, p.display_name, p.cwd, p.claude_pid, p.session_id,
+    this.db.run(`INSERT INTO participants (id, agent, name, display_name, title, cwd, claude_pid, session_id, transcript_path, permission_mode, inbound, state, epoch, bot_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.id, p.agent, p.name, p.display_name, p.title ?? null, p.cwd, p.claude_pid, p.session_id,
     p.transcript_path, p.permission_mode, p.inbound, p.state, p.epoch, p.bot_id, p.created_at, p.updated_at);
   }
   participant(id: string): ParticipantRow | undefined { return this.db.get<ParticipantRow>('SELECT * FROM participants WHERE id = ?', id); }
@@ -62,7 +62,7 @@ export class Store {
     return this.db.all<ParticipantRow>('SELECT * FROM participants WHERE agent = ? AND name = ? ORDER BY created_at', agent, name);
   }
   participantByPid(pid: number): ParticipantRow | undefined {
-    return this.db.get<ParticipantRow>("SELECT * FROM participants WHERE claude_pid = ? AND agent = 'claude' ORDER BY updated_at DESC LIMIT 1", pid);
+    return this.db.get<ParticipantRow>("SELECT * FROM participants WHERE claude_pid = ? AND agent IN ('claude', 'codex') ORDER BY updated_at DESC LIMIT 1", pid);
   }
   updateParticipant(id: string, patch: Partial<Omit<ParticipantRow, 'id'>>): void {
     const { sql, vals } = setClause(patch); if (!sql) return;

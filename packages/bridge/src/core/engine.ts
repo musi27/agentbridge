@@ -1,10 +1,10 @@
 // The bridge engine: the single sequencer and source of truth (§4.1). Tool calls, approvals, conversation state,
 // notices and deliveries all go through here. Transport layers (IPC, relay) authenticate callers and pass a Caller.
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
 import {
-  LIMITS, NONCE_RE, escapeNonce, toolParams, sanitizeBody, sanitizeLabel, slugifyName, ulid, shortId, AUTO_MODE_WARNING, zConversationSummary, zUlid,
+  LIMITS, NONCE_RE, escapeNonce, renderStandingInstruction, toolParams, sanitizeBody, sanitizeLabel, slugifyName, ulid, shortId, AUTO_MODE_WARNING, zConversationSummary, zUlid,
   type Adapter, type AgentType, type ApprovalFacts, type ConversationSummary, type EndReason, type Notifier, type OutboundItem,
   type OutboundMessage, type OutboundNotice, type ParticipantLink, type ParticipantRef, type PermissionMode, type PresenceChecker,
   type Reason, type ToolMethod, type ToolResult, type Origin,
@@ -19,13 +19,16 @@ import { Pipeline, type Gate, type Settled } from '../delivery/pipeline.ts';
 import { ClaudeLinkAdapter } from '../delivery/claude-adapter.ts';
 import { ApprovalStore, type Approval, type StartContext } from './approvals.ts';
 import * as N from './notices.ts';
+import { readSessionTitle, sessionBaseName } from './session-label.ts';
 import {
   canConfirm, canSend, checkExtend, checkInviteLimits, nextTurn, recipientMode, requesterMode, resolveAddress, resolveTurnLimit,
   transition, uniqueName, COOLDOWN_END_REASONS,
 } from './rules.ts';
 
-export const BRIDGE_VERSION = '0.1.2';
-const LOCAL_AGENTS: ReadonlySet<AgentType> = new Set(['claude', 'fake']);
+export const BRIDGE_VERSION = '0.2.0';
+const LOCAL_AGENTS: ReadonlySet<AgentType> = new Set(['claude', 'codex', 'fake']);
+/** Local sessions linked by an MCP server child process; they need a live link to receive (§10, §11a). */
+const isHost = (a: AgentType): boolean => a === 'claude' || a === 'codex';
 const isLocal = (p: ParticipantRow): boolean => LOCAL_AGENTS.has(p.agent);
 const address = (p: ParticipantRow): string => `${p.agent}:${p.name}`;
 
@@ -70,7 +73,7 @@ export interface ConnHandle {
 }
 const entryFor = (c: ConnHandle, x: { epoch: number; nonce: string; claude_pid: number }): LinkEntry =>
   ({ link: c.link, epoch: x.epoch, nonce: x.nonce, connId: c.connId, claude_pid: x.claude_pid, close: c.close, replace: c.replace ?? (() => c.close()) });
-interface PidInfo { session_id: string; source: string; transcript_path: string | null; cwd: string | null; at: number }
+interface PidInfo { session_id: string; source: string; transcript_path: string | null; cwd: string | null; at: number; permission_mode?: PermissionMode }
 
 export type EngineError = { error: { code: Reason | 'unauthenticated' | 'method_not_found' | 'internal'; message: string } };
 const err = (code: EngineError['error']['code'], message: string): EngineError => ({ error: { code, message } });
@@ -111,6 +114,7 @@ export class Engine {
   private readonly secrets = new Map<string, { participant_id: string; claude_pid: number; nonce: string; epoch: number }>();
   private readonly pidInfo = new Map<number, PidInfo>();
   private readonly pidWaiters = new Map<number, Array<() => void>>();
+  private readonly linkWaiters = new Map<number, Array<() => void>>();
   private readonly localEpochs = new Map<string, number>();
   private readonly idemInFlight = new Map<string, Promise<ToolResult>>();
   private readonly dedup = new Map<string, { at: number; peerSeq: number; result: ToolResult }>();
@@ -120,6 +124,8 @@ export class Engine {
   private readonly convTimers = new Map<string, TimerHandle[]>();
   private readonly syncWaits = new Set<string>();
   private readonly popupOnce = new Set<string>();
+  private readonly unknownModeTimers = new Map<string, TimerHandle>();
+  private readonly titleChecked = new Map<string, { at: number; path: string; size: number }>();
   private sweepTimer: TimerHandle | null = null;
   private started = false;
   private stopped = false;
@@ -139,7 +145,7 @@ export class Engine {
       store: this.store, clock: this.clock,
       hooks: {
         gate: (d, p) => this.gate(d, p),
-        adapterFor: (p) => (p.agent === 'claude' ? this.claudeAdapter : this.adapters[p.agent]),
+        adapterFor: (p) => (isHost(p.agent) ? this.claudeAdapter : this.adapters[p.agent]),
         refFor: (p) => this.refFor(p),
         onSettled: (d, s, prev) => this.onSettled(d, s, prev),
         onError: (where, e) => this.event('error', 'internal_error', { where, error: String((e as Error)?.stack ?? e).slice(0, 500) }),
@@ -177,6 +183,8 @@ export class Engine {
     this.convTimers.clear();
     for (const g of this.grokAwaiting.values()) this.clock.clearTimeout(g.timer);
     this.grokAwaiting.clear();
+    for (const t of this.unknownModeTimers.values()) this.clock.clearTimeout(t);
+    this.unknownModeTimers.clear();
     this.approvals.clear();
     this.pipeline.stop();
     for (const l of this.links.values()) { try { l.close(); } catch { /* closing */ } }
@@ -235,7 +243,7 @@ export class Engine {
     const p = this.store.participant(participantId); if (!p || p.permission_mode === mode) return;
     this.store.updateParticipant(participantId, { permission_mode: mode, updated_at: this.clock.now() });
     this.event('info', 'permission_mode', { mode }, participantId);
-    if (mode !== 'unknown') this.afterLive(participantId);
+    if (mode !== 'unknown') { this.clearUnknownModeTimer(participantId); this.afterLive(participantId); }
   }
 
   /** Grok bot participant (setup itself lives in `agentbridge add grok`, M2). */
@@ -256,7 +264,7 @@ export class Engine {
   private newParticipant(agent: AgentType, name: string, display: string, cwd: string | null, state: ParticipantRow['state'] = 'closed', botId: string | null = null): ParticipantRow {
     const now = this.clock.now();
     const p: ParticipantRow = {
-      id: ulid(now), agent, name, display_name: sanitizeLabel(display, LIMITS.nameChars) || name, cwd, claude_pid: null, session_id: null, transcript_path: null,
+      id: ulid(now), agent, name, display_name: sanitizeLabel(display, LIMITS.nameChars) || name, title: null, cwd, claude_pid: null, session_id: null, transcript_path: null,
       permission_mode: agent === 'grok' ? 'default' : 'unknown', inbound: 'accept', state, epoch: 0, bot_id: botId, created_at: now, updated_at: now,
     };
     this.store.insertParticipant(p);
@@ -283,7 +291,8 @@ export class Engine {
     const now = this.clock.now();
     if (e.event === 'start') {
       const source = e.source ?? 'startup';
-      this.pidInfo.set(e.claude_pid, { session_id: e.session_id, source, transcript_path: e.transcript_path ?? null, cwd: e.cwd ?? null, at: now });
+      // Codex reports the mode at SessionStart, often before its MCP server registers: keep it for registration
+      this.pidInfo.set(e.claude_pid, { session_id: e.session_id, source, transcript_path: e.transcript_path ?? null, cwd: e.cwd ?? null, at: now, ...(e.permission_mode ? { permission_mode: e.permission_mode } : {}) });
       const linked = this.participantForPid(e.claude_pid);
       const known = this.store.session(e.session_id);
       // `--resume` while the session still runs in another terminal: keep both; the new process is its own participant
@@ -310,6 +319,7 @@ export class Engine {
     }
     if (e.permission_mode) this.setPermissionMode(p.id, e.permission_mode);
     if (e.transcript_path && e.transcript_path !== p.transcript_path) this.store.updateParticipant(p.id, { transcript_path: e.transcript_path });
+    const tp = e.transcript_path ?? p.transcript_path; if (tp) this.refreshTitle(p.id, tp);
   }
 
   private linkSession(p: ParticipantRow, pid: number, sessionId: string, source: string, transcript: string | null, cwd: string | null): void {
@@ -344,7 +354,7 @@ export class Engine {
   }
 
   /** Plugin MCP server → bridge (§10 step 2). Returns the binding for this connection. */
-  async registerSession(r: { claude_pid: number; tag_nonce: string; inbox: { socket: string; token: string }; plugin_version: string; cwd?: string | undefined },
+  async registerSession(r: { claude_pid: number; host?: 'claude' | 'codex' | undefined; tag_nonce: string; inbox?: { socket: string; token: string } | undefined; plugin_version: string; cwd?: string | undefined },
     conn: ConnHandle): Promise<{ participant_id: string; address: string; epoch: number; session_secret: string } | EngineError> {
     const open = (): boolean => !this.stopped && (conn.isOpen ? conn.isOpen() : true);
     const alreadyLinked = [...this.links.values()].some((l) => l.claude_pid === r.claude_pid);
@@ -356,13 +366,17 @@ export class Engine {
     }
     // the connection may have closed while we waited: never let a dead registration displace a live one
     if (!open()) return err('unauthenticated', 'connection closed during registration');
+    const host = r.host ?? 'claude';
+    if (host === 'claude' && !r.inbox) return err('invalid_message', 'Claude Code registrations need the session inbox');
     let p = this.findForRegistration(r.claude_pid);
+    if (p && p.agent !== host) p = undefined; // a reused pid from another host never inherits a participant
     const info = this.pidInfo.get(r.claude_pid);
     const cwd = r.cwd ?? info?.cwd ?? null;
     if (!p) {
-      const taken = new Set(this.store.participants().filter((x) => x.agent === 'claude' && x.state !== 'gone').map((x) => x.name));
-      const base = cwd ? slugifyName(basename(cwd)) : 'session';
-      p = this.newParticipant('claude', uniqueName(base, taken), cwd ? basename(cwd) : 'session', cwd);
+      const taken = new Set(this.store.participants().filter((x) => x.agent === host && x.state !== 'gone').map((x) => x.name));
+      // address = folder + branch, fixed for the session's life; Claude Code's title is only a label (refreshTitle)
+      const base = sessionBaseName(cwd);
+      p = this.newParticipant(host, uniqueName(base, taken), cwd ? basename(cwd) : 'session', cwd);
     }
     const now = this.clock.now();
     const epoch = p.epoch + 1;
@@ -380,8 +394,10 @@ export class Engine {
       if (owner && owner !== p.id && this.liveElsewhere(owner, r.claude_pid)) this.store.updateParticipant(p.id, { session_id: info.session_id, ...(info.transcript_path ? { transcript_path: info.transcript_path } : {}) });
       else this.linkSession(this.store.participant(p.id)!, r.claude_pid, info.session_id, info.source, info.transcript_path, info.cwd);
     }
+    if (info?.permission_mode) this.setPermissionMode(p.id, info.permission_mode);
     this.reissueStaleInvites(p.id, epoch);
-    this.event('info', 'registered', { epoch, plugin_version: r.plugin_version }, p.id);
+    this.event('info', 'registered', { epoch, plugin_version: r.plugin_version, host }, p.id);
+    const ws = this.linkWaiters.get(r.claude_pid); if (ws) { this.linkWaiters.delete(r.claude_pid); for (const w of ws) w(); }
     if (inbound !== 'accept') {
       void this.popupOncePer(`unreachable:${p.id}`, 'agentbridge cannot reach a Claude session', `${address(p)}: crossSessionInbound is "${inbound}". Set it to "accept" in Claude Code settings so agentbridge messages arrive.`);
     }
@@ -464,7 +480,7 @@ export class Engine {
 
   private checkGone(): void {
     for (const p of this.store.participants()) {
-      if (p.agent !== 'claude' || p.state !== 'closed' || !p.transcript_path || this.transcriptExists(p.transcript_path)) continue;
+      if (!isHost(p.agent) || p.state !== 'closed' || !p.transcript_path || this.transcriptExists(p.transcript_path)) continue;
       this.store.updateParticipant(p.id, { state: 'gone', updated_at: this.clock.now() });
       this.event('info', 'participant_gone', {}, p.id);
       for (const c of this.store.conversationsOf(p.id)) if (c.state !== 'ended') this.endConversation(c, 'participant_gone', null);
@@ -472,14 +488,30 @@ export class Engine {
     }
   }
 
+  /**
+   * Codex SessionStart hook (§11a): the standing instruction with this session's tag code. The MCP server owns the
+   * code, so wait briefly for it to register if the hook got here first. Undefined if it never does.
+   */
+  async standingInstructionFor(hostPid: number, waitMs = LIMITS.codexContextWaitMs): Promise<string | undefined> {
+    const find = (): LinkEntry | undefined => [...this.links.values()].find((l) => l.claude_pid === hostPid);
+    if (!find() && waitMs > 0 && !this.stopped) {
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(resolve, waitMs); t.unref?.();
+        const list = this.linkWaiters.get(hostPid) ?? []; list.push(() => { clearTimeout(t); resolve(); }); this.linkWaiters.set(hostPid, list);
+      });
+    }
+    const l = find();
+    return l && NONCE_RE.test(l.nonce) ? renderStandingInstruction(l.nonce, 'codex') : undefined;
+  }
+
   private refFor(p: ParticipantRow): ParticipantRef {
     const nonce = this.links.get(p.id)?.nonce;
-    return { participant_id: p.id, address: address(p), agent: p.agent, ...(nonce ? { tag_nonce: nonce } : {}) };
+    return { participant_id: p.id, address: address(p), agent: p.agent, ...(nonce ? { tag_nonce: nonce } : {}), ...(p.agent === 'codex' && p.session_id ? { session_id: p.session_id } : {}) };
   }
 
   /** A Claude sender's own tag code never enters stored text, so a leaked code can't be echoed back as a genuine tag. */
   private escapeOwnNonce(p: ParticipantRow, text: string): string {
-    const nonce = p.agent === 'claude' ? this.links.get(p.id)?.nonce : undefined;
+    const nonce = isHost(p.agent) ? this.links.get(p.id)?.nonce : undefined;
     return nonce && NONCE_RE.test(nonce) ? escapeNonce(text, nonce) : text;
   }
 
@@ -544,7 +576,7 @@ export class Engine {
     const local = isLocal(p);
     if (!local && this.policyOrDefault().discovery.relay === 'none') return { status: 'delivered', data: [] };
     const rows = this.store.participants().filter((x) => x.id !== p.id && x.state !== 'gone');
-    return { status: 'delivered', data: rows.map((x) => ({ address: address(x), state: x.state, ...(local ? { short_id: shortId(x.id), ...(x.cwd ? { folder: basename(x.cwd) } : {}) } : {}) })) };
+    return { status: 'delivered', data: rows.map((x) => ({ address: address(x), ...(x.title ? { title: x.title } : {}), state: x.state, ...(local ? { short_id: shortId(x.id), ...(x.cwd ? { folder: basename(x.cwd) } : {}) } : {}) })) };
   }
 
   private participantView(): Array<{ id: string; agent: AgentType; name: string; state: string; cwd: string | null }> {
@@ -666,7 +698,7 @@ export class Engine {
     if (!to || !from) return 'held';
     if (!this.policyOk()) return 'held';
     if (to.inbound !== 'accept') { this.store.updateConversation(c.id, { queued: 1 }); return 'unreachable'; }
-    if (to.state !== 'live' || (to.agent === 'claude' && !this.links.has(to.id))) { this.store.updateConversation(c.id, { queued: 1 }); return 'held'; }
+    if (to.state !== 'live' || (isHost(to.agent) && !this.links.has(to.id))) { this.store.updateConversation(c.id, { queued: 1 }); return 'held'; }
     const pol = this.policyOrDefault();
     const rm = recipientMode(to.permission_mode, pol.delivery.allow_bypass_sessions);
     if (rm.hold) return 'held';
@@ -889,7 +921,7 @@ export class Engine {
       default:
         if (row.hold === 'unreachable') return { status: 'queued', reason: 'recipient_unreachable' };
         if (row.hold === 'closed') return { status: 'queued', hint: `${address(to)} is closed; it will be delivered when it reopens (agentbridge open ${address(to)})` };
-        if (row.hold === 'unknown_mode') return { status: 'queued', hint: `${address(to)} has not reported its permission mode yet` };
+        if (row.hold === 'unknown_mode') return { status: 'queued', hint: N.unknownModeHint(address(to)) };
         if (row.hold === 'serialized') return { status: 'queued', hint: 'held until the peer replies to the previous delivery' };
         if (row.hold === 'cap') return { status: 'queued', hint: 'held: hourly delivery cap for this bot reached' };
         return { status: 'queued', ...(row.reason ? { reason: row.reason } : {}) };
@@ -1157,6 +1189,36 @@ export class Engine {
   }
 
   /** Send a notice to a participant (Claude: ab-notice post; Grok: notice-only delivery or a field in the next one). */
+  /**
+   * A delivery is held because the session hasn't reported its permission mode (no prompt typed yet).
+   * If it is still unknown after LIMITS.unknownModePopupMs, tell the user once per session epoch.
+   */
+  private armUnknownModeTimer(pid: string): void {
+    if (this.unknownModeTimers.has(pid) || this.stopped) return;
+    this.unknownModeTimers.set(pid, this.clock.setTimeout(() => {
+      this.unknownModeTimers.delete(pid);
+      const p = this.store.participant(pid);
+      if (!p || p.state === 'gone' || p.permission_mode !== 'unknown') return;
+      const n = N.unknownModePopup(address(p), p.title);
+      void this.popupOncePer(`unknown_mode:${p.id}:${p.epoch}`, n.title, n.body);
+    }, LIMITS.unknownModePopupMs));
+  }
+  private clearUnknownModeTimer(pid: string): void {
+    const t = this.unknownModeTimers.get(pid); if (t !== undefined) { this.clock.clearTimeout(t); this.unknownModeTimers.delete(pid); }
+  }
+
+  /** Label a Claude session with Claude Code's own title (§5). Throttled; skipped when the transcript hasn't grown. */
+  private refreshTitle(pid: string, transcriptPath: string): void {
+    const now = this.clock.now(); const last = this.titleChecked.get(pid);
+    if (last && last.path === transcriptPath && now - last.at < LIMITS.titleRefreshMs) return;
+    let size = -1; try { size = statSync(transcriptPath).size; } catch { /* not written yet */ }
+    this.titleChecked.set(pid, { at: now, path: transcriptPath, size });
+    if (last && last.path === transcriptPath && last.size === size) return;
+    const title = readSessionTitle(transcriptPath);
+    const p = this.store.participant(pid);
+    if (p && title && title !== p.title) this.store.updateParticipant(pid, { title });
+  }
+
   notify(pid: string, c: ConversationRow | null, n: OutboundNotice, opts: { popupIfClosed?: boolean } = {}): void {
     const p = this.store.participant(pid);
     if (!p || p.state === 'gone') return;
@@ -1197,7 +1259,7 @@ export class Engine {
     const pol = this.policyOrDefault();
     if (isLocal(p)) {
       if (p.inbound !== 'accept') return { hold: 'unreachable', scope: 'participant', reason: 'recipient_unreachable' };
-      if (p.state !== 'live' || (p.agent === 'claude' && !this.links.has(p.id))) return { hold: 'closed', scope: 'participant' };
+      if (p.state !== 'live' || (isHost(p.agent) && !this.links.has(p.id))) return { hold: 'closed', scope: 'participant' };
       const m = recipientMode(p.permission_mode, pol.delivery.allow_bypass_sessions);
       if (m.hold) return { hold: 'unknown_mode', scope: 'participant' };
       if (!m.ok) return { fail: m.reason! };
@@ -1251,6 +1313,7 @@ export class Engine {
       return;
     }
     if (s.state === 'queued' || s.state === 'held_by_host') {
+      if (s.hold === 'unknown_mode' && to) this.armUnknownModeTimer(to.id);
       if (approvalId) {
         // invite could not be posted: withdraw the approval and re-issue when the session is live again
         this.inviteDeliveries.delete(d.id);
@@ -1444,5 +1507,5 @@ export class Engine {
   liveConnections(): number { return this.links.size; }
 
   /** The adapter registered for an agent type (doctor, Grok setup). */
-  adapterFor(agent: AgentType): Adapter | undefined { return agent === 'claude' ? this.claudeAdapter : this.adapters[agent]; }
+  adapterFor(agent: AgentType): Adapter | undefined { return isHost(agent) ? this.claudeAdapter : this.adapters[agent]; }
 }

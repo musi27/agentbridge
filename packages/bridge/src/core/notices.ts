@@ -54,6 +54,16 @@ export function inviteExpiredForInitiator(peer: string): OutboundNotice {
   return make('approval_expired', 'warning', [trusted(`${peer} did not accept your invitation in time; the conversation ended.`)]);
 }
 
+/** Returned to a sender whose delivery waits for a new session's first prompt (§7.4). */
+export const unknownModeHint = (recipient: string): string =>
+  `held: ${recipient} is a new session that hasn't had its first prompt yet. It will be delivered as soon as someone types in that session (agentbridge waits until it knows the session's permission mode).`;
+
+/** Desktop popup when that wait passes LIMITS.unknownModePopupMs. `title` is Claude Code's session title, if any. */
+export const unknownModePopup = (recipient: string, title: string | null): { title: string; body: string } => ({
+  title: 'agentbridge: message waiting',
+  body: `${recipient}${title ? ` ("${title}")` : ''} has a message waiting. Type anything in that session to receive it.`,
+});
+
 export function queuedNotice(recipient: string): OutboundNotice {
   return make('queued', 'info', [trusted(`${recipient} is closed. Your message is queued and will be delivered when it reopens (agentbridge open ${recipient}).`)]);
 }

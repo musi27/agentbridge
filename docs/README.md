@@ -6,6 +6,7 @@
 |---|---|
 | [../README.md](../README.md) | What agentbridge is, requirements, install, approvals, security boundary, data and privacy, limitations |
 | [setup-grok.md](setup-grok.md) | Connect a Grok bot with `agentbridge add grok`, step by step, and fix round-trip failures |
+| [setup-codex.md](setup-codex.md) | Connect Codex CLI sessions with `agentbridge add codex`, trust the hooks, and how approval works there |
 | [troubleshooting.md](troubleshooting.md) | Unreachable sessions, held deliveries, unsafe permission modes, Claude Code version, bridge and relay problems, Touch ID |
 | [self-hosting.md](self-hosting.md) | Run your own relay on Vercel and Upstash |
 

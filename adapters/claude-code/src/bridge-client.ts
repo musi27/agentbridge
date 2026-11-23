@@ -18,6 +18,8 @@ export interface BridgeClientOptions {
   tagNonce: string;
   /** From CLAUDE_CODE_MESSAGING_SOCKET / _TOKEN in this process's env. null = Claude Code gave us no inbox. */
   inbox: InboxTarget | null;
+  /** Codex host (§11a): posts go through this instead of an inbox, into the thread the bridge names. */
+  codex?: { post(text: string, threadId?: string): Promise<void> };
   pluginVersion: string;
   cwd?: string;
   /** Reconnect backoff. The delay only resets after a connection stayed registered for `stableMs`, so a bridge that
@@ -43,7 +45,7 @@ const isReason = (s: string): s is Reason => (REASONS as readonly string[]).incl
 
 export class BridgeClient {
   readonly #o: BridgeClientOptions;
-  readonly #poster: InboxPoster | null;
+  readonly #poster: { post(text: string, threadId?: string): Promise<void> } | null;
   readonly #log: (msg: string) => void;
   #state: LinkState;
   #conn: IpcConnection | null = null;
@@ -60,8 +62,8 @@ export class BridgeClient {
     this.#o = o;
     this.#log = o.log ?? (() => {});
     this.#delay = o.backoff?.initialMs ?? 250;
-    this.#poster = o.inbox ? new InboxPoster(o.inbox, { ...(o.postSpacingMs !== undefined ? { spacingMs: o.postSpacingMs } : {}), ...(o.post ? { post: o.post } : {}) }) : null;
-    this.#state = o.inbox ? 'offline' : 'no_inbox';
+    this.#poster = o.codex ?? (o.inbox ? new InboxPoster(o.inbox, { ...(o.postSpacingMs !== undefined ? { spacingMs: o.postSpacingMs } : {}), ...(o.post ? { post: o.post } : {}) }) : null);
+    this.#state = this.#poster ? 'offline' : 'no_inbox';
   }
 
   get state(): LinkState { return this.#state; }
@@ -125,7 +127,7 @@ export class BridgeClient {
 
   async #connectOnce(): Promise<void> {
     const inbox = this.#o.inbox;
-    if (!inbox) throw new Error('no inbox');
+    if (!inbox && !this.#o.codex) throw new Error('no inbox');
     const conn = await (this.#o.connect ?? ((p) => connectIpc(p)))(this.#o.socketPath);
     this.#conn = conn;
     // Attach before the first request: the IPC client dispatches every line of a read synchronously, so a `deliver`
@@ -155,7 +157,8 @@ export class BridgeClient {
     }
     if (!reg) {
       reg = await conn.request('register_session', {
-        claude_pid: this.#o.claudePid, tag_nonce: this.#o.tagNonce, inbox: { socket: inbox.socket, token: inbox.token },
+        claude_pid: this.#o.claudePid, tag_nonce: this.#o.tagNonce,
+        ...(this.#o.codex ? { host: 'codex' } : { inbox: { socket: inbox!.socket, token: inbox!.token } }),
         plugin_version: this.#o.pluginVersion, ...(this.#o.cwd ? { cwd: this.#o.cwd } : {}),
       }, 5000);
     }
@@ -201,7 +204,7 @@ export class BridgeClient {
       if (conn.closed) return;
       let ok = true;
       let error: string | undefined;
-      try { await this.#poster.post(item.text); } catch (e) { ok = false; error = e instanceof Error ? e.message : String(e); }
+      try { await this.#poster.post(item.text, parsed.data.thread_id); } catch (e) { ok = false; error = e instanceof Error ? e.message : String(e); }
       try {
         await conn.request('post_result', error === undefined ? { post_id: item.post_id, ok } : { post_id: item.post_id, ok, error }, 5000);
       } catch (e) { this.#log(`post_result ${item.post_id}: ${e instanceof Error ? e.message : String(e)}`); }

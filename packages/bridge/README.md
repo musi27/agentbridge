@@ -142,7 +142,8 @@ relay expiry records become notice-only Grok deliveries; reaching the cap raises
 ## Behaviour notes
 
 - Addresses that match several participants return `recipient_ambiguous` with candidates; `<agent>:<short_id>`
-  picks one. New Claude participants are named after the cwd basename, with `-2`, `-3` suffixes.
+  picks one. New Claude participants are named after the cwd basename plus the git branch (unless it is a default
+  branch), with `-2`, `-3` suffixes. Claude Code's session title is shown beside the address as a label.
 - The message that reaches the turn limit is delivered, then the conversation ends. If that delivery fails, the
   turn is given back and the conversation continues.
 - Turn numbers are labels and are never reused. `turn_count` counts consumed turns; a permanently failed or expired

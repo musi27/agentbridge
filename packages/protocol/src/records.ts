@@ -5,7 +5,7 @@ import { ULID_RE } from './ids.ts';
 import { LIMITS } from './limits.ts';
 
 export const zUlid = z.string().regex(ULID_RE, 'expected ULID');
-export const zAddress = z.string().regex(/^(claude|grok|fake):[A-Za-z0-9_-]{1,64}$/, 'expected <agent>:<name>');
+export const zAddress = z.string().regex(/^(claude|grok|fake|codex):[A-Za-z0-9_-]{1,64}$/, 'expected <agent>:<name>');
 export const zTopic = z.string().min(1).max(LIMITS.topicChars * 4); // raw input; sanitizeLabel caps to 120 code points
 export const zBody = z.string().refine((s) => Buffer.byteLength(s, 'utf8') <= LIMITS.bodyBytes, 'too_large');
 export const zTurnLimit = z.number().int().min(1).max(LIMITS.turnLimitMax);

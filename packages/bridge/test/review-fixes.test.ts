@@ -87,7 +87,7 @@ test('3: adapter-supplied failure detail never lands in a trusted notice part', 
 test('3: a throwing gate or onSettled hook does not stop the pipeline', async () => {
   const store = new Store(openDatabase(':memory:')); const clock = new FakeClock();
   const now = clock.now();
-  store.insertParticipant({ id: 'P1', agent: 'fake', name: 'p', display_name: 'p', cwd: null, claude_pid: null, session_id: null, transcript_path: null, permission_mode: 'default', inbound: 'accept', state: 'live', epoch: 1, bot_id: null, created_at: now, updated_at: now });
+  store.insertParticipant({ id: 'P1', agent: 'fake', name: 'p', display_name: 'p', title: null, cwd: null, claude_pid: null, session_id: null, transcript_path: null, permission_mode: 'default', inbound: 'accept', state: 'live', epoch: 1, bot_id: null, created_at: now, updated_at: now });
   const fake = new FakeAdapter(); const errors: string[] = []; let gateCalls = 0; let settled = 0;
   const pl = new Pipeline({ store, clock, hooks: {
     gate: () => { gateCalls++; if (gateCalls === 1) throw new Error('boom'); return { go: true }; },
@@ -219,7 +219,7 @@ test('also: turn numbers are never reused after a refund; headers shift by the r
 
 test('also: queue expiry never races an in-flight delivery', async () => {
   const store = new Store(openDatabase(':memory:')); const clock = new FakeClock(); const now = clock.now();
-  store.insertParticipant({ id: 'P1', agent: 'fake', name: 'p', display_name: 'p', cwd: null, claude_pid: null, session_id: null, transcript_path: null, permission_mode: 'default', inbound: 'accept', state: 'live', epoch: 1, bot_id: null, created_at: now, updated_at: now });
+  store.insertParticipant({ id: 'P1', agent: 'fake', name: 'p', display_name: 'p', title: null, cwd: null, claude_pid: null, session_id: null, transcript_path: null, permission_mode: 'default', inbound: 'accept', state: 'live', epoch: 1, bot_id: null, created_at: now, updated_at: now });
   let release!: () => void; const fake = new FakeAdapter();
   fake.nextOutcome(() => new Promise((r) => { release = () => r({ status: 'delivered' }); }));
   const states: string[] = [];

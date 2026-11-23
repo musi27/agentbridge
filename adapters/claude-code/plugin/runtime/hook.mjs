@@ -29,6 +29,11 @@ var LIMITS = {
   relayResultBytes: 64 * 1024,
   // bridge keeps each Grok tool result (relay `res`) under this; reads page beyond it (§12.3)
   grokSerializeAfterMs: 5 * 60 * 1e3,
+  unknownModePopupMs: 30 * 1e3,
+  // popup when a delivery waits this long on a session that hasn't reported its mode
+  titleRefreshMs: 15 * 1e3,
+  codexContextWaitMs: 3e3,
+  // Codex SessionStart hook waits this long for the MCP server to register (§11a) // re-read a session's Claude Code title at most this often
   invitesPendingPerRemote: 3,
   invitesPendingPerTarget: 10,
   inviteCooldownMs: 10 * 60 * 1e3,
@@ -297,7 +302,7 @@ var SOURCES = ["startup", "resume", "clear", "compact", "fork"];
 var HOOK_IPC_PROTOCOL = 1;
 var HOOK_PERMISSION_MODES = ["default", "plan", "acceptEdits", "auto", "dontAsk", "bypassPermissions", "unknown"];
 var STATE_EVENTS = /* @__PURE__ */ new Set(["UserPromptSubmit", "PreToolUse", "Stop"]);
-function buildSessionEvent(input, claudePid) {
+function buildSessionEvent(input, claudePid, host2 = "claude") {
   const name = input.hook_event_name;
   if (typeof input.session_id !== "string" || !input.session_id || !Number.isInteger(claudePid) || claudePid <= 0) return null;
   let event;
@@ -305,7 +310,7 @@ function buildSessionEvent(input, claudePid) {
   else if (name === "SessionEnd") event = "end";
   else if (name && STATE_EVENTS.has(name)) event = "state";
   else return null;
-  const p = { event, claude_pid: claudePid, session_id: input.session_id };
+  const p = { event, claude_pid: claudePid, session_id: input.session_id, ...host2 === "codex" ? { host: host2 } : {} };
   if (event === "start" && SOURCES.includes(input.source ?? "")) p.source = input.source;
   if (typeof input.permission_mode === "string") {
     p.permission_mode = HOOK_PERMISSION_MODES.includes(input.permission_mode) ? input.permission_mode : "unknown";
@@ -314,7 +319,7 @@ function buildSessionEvent(input, claudePid) {
   if (typeof input.cwd === "string" && input.cwd) p.cwd = input.cwd;
   return p;
 }
-async function sendSessionEvent(socketPath, params, timeoutMs = 700) {
+async function sendSessionEvent(socketPath, params, timeoutMs = 700, onContext) {
   const deadline = Date.now() + timeoutMs;
   const left = () => Math.max(1, deadline - Date.now());
   let conn;
@@ -325,13 +330,18 @@ async function sendSessionEvent(socketPath, params, timeoutMs = 700) {
   }
   try {
     await conn.request("hello", { protocol: HOOK_IPC_PROTOCOL, client: "hook", client_version: PLUGIN_VERSION }, left());
-    await conn.request("session_event", params, left());
+    const res = await conn.request("session_event", params, left());
+    if (onContext && res && typeof res.context === "string" && res.context) onContext(res.context);
     return "ok";
   } catch {
     return "error";
   } finally {
     conn.close();
   }
+}
+var CODEX_START_TIMEOUT_MS = 4e3;
+function hookMessage(host2, text, event = "SessionStart") {
+  return host2 === "codex" ? JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: text } }) : JSON.stringify({ systemMessage: text });
 }
 async function runHook(stdin2, deps = {}) {
   let input;
@@ -342,25 +352,32 @@ async function runHook(stdin2, deps = {}) {
   }
   if (!input || typeof input !== "object") return "";
   const env = deps.env ?? process.env;
-  const params = buildSessionEvent(input, deps.ppid ?? process.ppid);
+  const host2 = deps.host ?? "claude";
+  const params = buildSessionEvent(input, deps.ppid ?? process.ppid, host2);
   if (!params) return "";
   const socket = bridgeSocketPath(env);
-  const first = await sendSessionEvent(socket, params, deps.eventTimeoutMs);
+  let context = "";
+  const codexStart = host2 === "codex" && params.event === "start";
+  const onContext = codexStart ? (t) => {
+    context = t;
+  } : void 0;
+  const first = await sendSessionEvent(socket, params, deps.eventTimeoutMs ?? (codexStart ? CODEX_START_TIMEOUT_MS : void 0), onContext);
+  if (context) return hookMessage(host2, context);
   if (first !== "offline" || params.event !== "start") return "";
   if ((deps.setupInProgress ?? setupInProgress)(env)) {
-    return JSON.stringify({ systemMessage: "agentbridge: setup (agentbridge init) is running; the bridge will be back in a moment." });
+    return hookMessage(host2, "agentbridge: setup (agentbridge init) is running; the bridge will be back in a moment.");
   }
   const cli = (deps.findCli ?? findCli)(env);
   if (!cli) {
-    return JSON.stringify({ systemMessage: "agentbridge: the bridge is not running and the `agentbridge` command was not found, so this session cannot talk to other agents. Install agentbridge or run `agentbridge start`." });
+    return hookMessage(host2, "agentbridge: the bridge is not running and the `agentbridge` command was not found, so this session cannot talk to other agents. Install agentbridge or run `agentbridge start`.");
   }
   if (!(deps.startBridge ?? startBridgeDetached)(cli, env)) {
-    return JSON.stringify({ systemMessage: "agentbridge: the bridge is not running and could not be started. Run `agentbridge start`." });
+    return hookMessage(host2, "agentbridge: the bridge is not running and could not be started. Run `agentbridge start`.");
   }
   const until = Date.now() + (deps.startWaitMs ?? 500);
   while (Date.now() < until) {
     await new Promise((r) => setTimeout(r, 100));
-    if (await sendSessionEvent(socket, params, Math.max(50, until - Date.now())) !== "offline") return "";
+    if (await sendSessionEvent(socket, params, codexStart ? CODEX_START_TIMEOUT_MS : Math.max(50, until - Date.now()), onContext) !== "offline") return context ? hookMessage(host2, context) : "";
   }
   return "";
 }
@@ -373,12 +390,13 @@ var exit = () => {
 `);
   process.exit(0);
 };
-var hardStop = setTimeout(exit, 900);
+var host = process.argv.includes("--host=codex") ? "codex" : "claude";
+var hardStop = setTimeout(exit, host === "codex" ? CODEX_START_TIMEOUT_MS + 1500 : 900);
 var stdin = "";
 try {
   process.stdin.setEncoding("utf8");
   for await (const chunk of process.stdin) stdin += chunk;
-  const out = await runHook(stdin);
+  const out = await runHook(stdin, { host });
   if (out) process.stdout.write(out + "\n");
 } catch {
 }

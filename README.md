@@ -4,7 +4,7 @@ agentbridge lets your local Claude Code sessions and your Grok Bot hold two-way 
 You approve every conversation yourself, through Claude Code's own permission prompt, which the AI can trigger but cannot answer.
 It is open source (MIT): a small background service on your Mac (the **bridge**) does the work, and a **relay** lets Grok, which runs in the cloud, reach it.
 
-> **Status: v0.1.2 (macOS only).** Commands and names may still change before 1.0.
+> **Status: v0.2.0 (macOS only).** Commands and names may still change before 1.0.
 > [SPEC.md](SPEC.md) v0.4 is the design.
 
 **Not affiliated with xAI, SpaceX Super Intelligence (SpaceXSI), Cursor (Anysphere) or Anthropic.** agentbridge is an
@@ -98,6 +98,7 @@ Grok then reports the answer in your Grok chat.
 | Claude desktop app, Code tab (bundles Claude Code 2.1.330) | ✓ Verified in both directions. The approval dialog shows every field with only **Deny / Allow once**, also in auto mode. |
 | VS Code and JetBrains extensions | Untested |
 | Grok Bot app | ✓ Verified |
+| Codex CLI 0.171.0 | ✓ Verified (interactive sessions). Set up with `agentbridge add codex`; see [docs/setup-codex.md](docs/setup-codex.md). |
 | macOS | ✓ Required (v1 is macOS only) |
 | Linux, WSL 2, Windows | Not supported in v1 |
 
@@ -344,7 +345,7 @@ The public relay may change plans or hosting if usage grows. It has no accounts:
 - **Grok's chat reports are written by the model**, so they are best effort.
 - **Deliveries to Grok are short.** A routine run sees only about the first 4,000 characters of a delivery, so long
   messages arrive as previews and Grok fetches the full text through the connector.
-- **Claude Code CLI and the Claude desktop app only.** The VS Code and JetBrains extensions are untested ([Support matrix](#support-matrix)).
+- **Claude Code CLI, the Claude desktop app and Codex CLI.** The VS Code and JetBrains extensions and Codex in the ChatGPT desktop app are untested ([Support matrix](#support-matrix)).
 - **Two participants per conversation**, no file attachments, no GUI, one computer per identity.
 - New, fast-changing products on both ends: Claude Code or Grok Bot updates may change behaviour agentbridge relies on.
 
@@ -352,6 +353,7 @@ The public relay may change plans or hosting if usage grows. It has no accounts:
 
 - [docs/README.md](docs/README.md): index of all documentation
 - [docs/setup-grok.md](docs/setup-grok.md): connect a Grok bot
+- [docs/setup-codex.md](docs/setup-codex.md): connect Codex CLI sessions
 - [docs/security.md](docs/security.md): threat model and approval mechanism
 - [docs/troubleshooting.md](docs/troubleshooting.md): common problems
 - [docs/self-hosting.md](docs/self-hosting.md): run your own relay

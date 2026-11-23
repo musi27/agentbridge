@@ -48,10 +48,12 @@ export function parseArgs(argv: readonly string[]): Parsed {
   return out;
 }
 
-const HELP = `agentbridge — conversations between your Claude Code sessions and Grok bots
+const HELP = `agentbridge — conversations between your Claude Code sessions, Codex CLI sessions and Grok bots
 
 Unprivileged:
   status | agents | conversations | doctor [grok:<name>] | logs [--limit N] | open <address> | start | config get
+Setup:
+  init | add codex | remove codex   (add codex: connect Codex CLI sessions; edits ~/.codex/config.toml)
 Privileged (Touch ID / password, checked by the bridge):
   approve <id> | decline <id> | extend <id> <n> | end <id> | end --inactive <duration> | show <id>
   config set <key> <value> | config verify [show|reapprove|restore] | remove <address> | purge [--before <duration>] | stop
@@ -61,19 +63,33 @@ Global options (after the subcommand for privileged commands): --json, --home <d
 
 type Print = (s: string) => void;
 
+type AgentRow = { address: string; title?: string; state: string; permission_mode: string; short_id: string; folder?: string };
+const UNKNOWN_MODE_NOTE = '(waiting for first prompt: messages to that session are held until someone types in it)';
+/** One agent per line: address, state, mode, short id, folder, then Claude Code's session title. */
+function agentLine(p: AgentRow): string {
+  const mode = p.permission_mode === 'unknown' ? 'waiting for first prompt' : p.permission_mode;
+  return `${p.address.padEnd(28)} ${p.state.padEnd(12)} ${mode.padEnd(24)} ${p.short_id}${p.folder ? `  ${p.folder}` : ''}${p.title ? `  "${p.title}"` : ''}`;
+}
+
 function human(cmd: string, r: unknown, print: Print): void {
   const rows = (x: unknown): Array<Record<string, unknown>> => (Array.isArray(x) ? (x as Array<Record<string, unknown>>) : []);
   if (cmd === 'status') {
-    const s = r as { bridge_version: string; pid: number; policy: { ok: boolean; mode?: string; version?: number; reason?: string }; participants: Array<{ address: string; state: string; permission_mode: string; short_id: string; folder?: string }>; conversations: Record<string, number>; queued_deliveries: number; pending_approvals: Array<{ approval_id: string; kind: string; participant: string; peer: string; expires_in_s: number | null }>; auto_mode_sessions: string[]; notifications: Array<{ at: string; title: string; body: string }> };
+    const s = r as { bridge_version: string; pid: number; policy: { ok: boolean; mode?: string; version?: number; reason?: string }; participants: Array<{ address: string; title?: string; state: string; permission_mode: string; short_id: string; folder?: string }>; conversations: Record<string, number>; queued_deliveries: number; pending_approvals: Array<{ approval_id: string; kind: string; participant: string; peer: string; expires_in_s: number | null }>; auto_mode_sessions: string[]; notifications: Array<{ at: string; title: string; body: string }> };
     print(`bridge ${s.bridge_version} (pid ${s.pid}) — policy ${s.policy.ok ? `v${s.policy.version}, mode ${s.policy.mode}` : `TAMPERED (${s.policy.reason}): run agentbridge config verify`}`);
     print(`conversations: ${s.conversations['active']} active, ${s.conversations['pending']} pending, ${s.conversations['ended']} ended; ${s.queued_deliveries} queued deliveries`);
-    for (const p of s.participants) print(`  ${p.address.padEnd(28)} ${p.state.padEnd(12)} ${p.permission_mode.padEnd(18)} ${p.short_id}${p.folder ? `  ${p.folder}` : ''}`);
+    for (const p of s.participants) print(`  ${agentLine(p)}`);
+    if (s.participants.some((p) => p.permission_mode === 'unknown')) print(UNKNOWN_MODE_NOTE);
     for (const a of s.pending_approvals) print(`  approval ${a.approval_id} ${a.kind} ${a.participant} ↔ ${a.peer}${a.expires_in_s !== null ? ` (expires in ${a.expires_in_s}s)` : ''}`);
     if (s.auto_mode_sessions.length) print(`warning: sessions in Claude Code auto mode: ${s.auto_mode_sessions.join(', ')}`);
     for (const n of s.notifications) print(`notice ${n.at}: ${n.title} — ${n.body}`);
     return;
   }
-  if (cmd === 'agents') { for (const p of rows(r)) print(`${String(p['address']).padEnd(28)} ${String(p['state']).padEnd(12)} ${String(p['permission_mode']).padEnd(18)} ${p['short_id']}${p['folder'] ? `  ${p['folder']}` : ''}`); return; }
+  if (cmd === 'agents') {
+    const ps = rows(r) as unknown as AgentRow[];
+    for (const p of ps) print(agentLine(p));
+    if (ps.some((p) => p.permission_mode === 'unknown')) print(UNKNOWN_MODE_NOTE);
+    return;
+  }
   if (cmd === 'conversations') { for (const c of rows(r)) print(`${c['id']}  ${String(c['state']).padEnd(7)} ${String(c['turns']).padEnd(7)} ${c['initiator']} → ${c['invitee']}  ${c['end_reason'] ?? ''}`); return; }
   if (cmd === 'doctor') {
     for (const c of rows((r as { checks: unknown }).checks)) print(`${c['ok'] ? 'ok  ' : 'FAIL'} ${c['id']}: ${c['detail']}${c['fix'] ? ` — fix: ${c['fix']}` : ''}`);
@@ -114,6 +130,15 @@ async function offlineDoctor(home: string | undefined): Promise<Array<{ id: stri
     { id: 'bridge', ok: false, detail: 'the bridge is not running (relay identity and session checks need it)', fix: 'agentbridge start' },
     ...await platformDoctor({ claude: () => claude.doctor(), helper: () => presence.verifyHelper(), launchd: () => launchd.status(), launchdProgram: () => launchdProgramChecks(launchd.plistPath), launchdOwner: async () => ownerCheck(await launchdOwner(launchd.serviceTarget, resolvePaths(home).lock, pidAlive)), relay: { policy: () => policy, secrets: null } }),
   ];
+}
+
+/** `agentbridge add codex` / `remove codex` (§11a): edits only the managed block in $CODEX_HOME/config.toml. */
+async function codexSetup(cmd: 'add' | 'remove', print: Print): Promise<number> {
+  const { addCodex, removeCodex, CODEX_NEXT_STEPS } = await import('../init/codex.ts');
+  const r = cmd === 'add' ? addCodex() : removeCodex();
+  print(`${r.ok ? 'ok  ' : 'FAIL'} ${r.message}`);
+  if (r.ok && r.changed) print(cmd === 'add' ? `(a copy of the previous file is in ${r.path}.agentbridge-backup)\n\n${CODEX_NEXT_STEPS.join('\n')}` : 'Restart any open Codex sessions to drop the agentbridge tools.');
+  return r.ok ? 0 : 1;
 }
 
 async function call(socket: string, method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
@@ -299,6 +324,7 @@ export async function main(argv: readonly string[], print: Print = (s) => proces
     if (p.cmd === 'uninstall') return await uninstall(p.home, p.args, p.json, print);
     if (p.cmd === 'start') { print(await startDetached(p.home)); return 0; }
     if (p.cmd === 'serve') { await serve(p.home, print); return -1; }
+    if ((p.cmd === 'add' || p.cmd === 'remove') && p.args[0] === 'codex') return await codexSetup(p.cmd, print);
     const req = toRequest(p);
     const socket = resolvePaths(p.home).socket;
     // interactive Grok flows (§12.5, §12.6); --json is not offered for them

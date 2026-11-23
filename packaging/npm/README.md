@@ -23,6 +23,9 @@ registers with the relay (`https://relay.musi.live`), lets you choose the approv
 
 Then connect a Grok bot (about 4 minutes): `agentbridge add grok`.
 
+Using Codex CLI too? `agentbridge add codex`, then trust the agentbridge hooks once with `/hooks` in Codex. Codex
+sessions show up as `codex:<folder>`, and you approve conversations in Codex's own Allow / Cancel prompt.
+
 First try: open a Claude Code session and ask "use agentbridge to list the agents you can talk to".
 
 ## Uninstall

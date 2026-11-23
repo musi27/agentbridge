@@ -34,7 +34,10 @@ export const SEVERITIES = ['info', 'warning', 'error'] as const;
 export const ORIGINS = ['local', 'relay'] as const;
 export const APPROVAL_MODES = ['per_conversation', 'auto'] as const;
 export const PARTICIPANT_STATES = ['live', 'closed', 'gone', 'unreachable'] as const;
-export const AGENT_TYPES = ['claude', 'grok', 'fake'] as const;
+export const AGENT_TYPES = ['claude', 'grok', 'fake', 'codex'] as const;
+/** Agents that run as local sessions linked to the bridge by an MCP server child process (§10, §11, §11a). */
+export const HOST_AGENTS = ['claude', 'codex'] as const;
+export type HostAgent = (typeof HOST_AGENTS)[number];
 export const DELIVERY_STATES = ['accepted', 'queued', 'handed_off', 'held_by_host', 'delivered', 'failed', 'expired'] as const;
 
 export type ConversationState = (typeof CONVERSATION_STATES)[number];

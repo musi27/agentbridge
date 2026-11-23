@@ -1,7 +1,7 @@
 // Local IPC contract (§10). Unix socket ~/.agentbridge/run/bridge.sock (dir 0700, socket 0600, peer UID checked),
 // newline-delimited JSON frames <= 256 KB. Every method below is the complete surface; anything else -> invalid_message.
 import { z } from 'zod';
-import { zPermissionMode, zReason, zStatus } from './enums.ts';
+import { HOST_AGENTS, zPermissionMode, zReason, zStatus } from './enums.ts';
 import { zAddress, zApprovalFacts, zBody, zTopic, zTurnLimit, zUlid, zConversationSummary } from './records.ts';
 import { NONCE_RE } from './ids.ts';
 
@@ -25,7 +25,7 @@ export const zToolResult = z.object({
   conversation_id: zUlid.optional(),
   message_id: zUlid.optional(),
   approval: zApprovalFacts.optional(), // present iff status = pending_approval
-  candidates: z.array(z.object({ address: zAddress, short_id: z.string(), folder: z.string().optional() })).optional(), // recipient_ambiguous
+  candidates: z.array(z.object({ address: zAddress, title: z.string().optional(), short_id: z.string(), folder: z.string().optional() })).optional(), // recipient_ambiguous
   warning: z.string().optional(), // e.g. AUTO_MODE_WARNING
   hint: z.string().optional(),
   data: z.unknown().optional(), // list/transcript payloads
@@ -39,6 +39,7 @@ const zHelloResult = z.object({ protocol: z.number().int(), bridge_version: z.st
 /** Hook → bridge (unauthenticated; bridge verifies the socket peer is a child of claude_pid, §10). */
 const zSessionEvent = z.object({
   event: z.enum(['start', 'end', 'state']),
+  host: z.enum(HOST_AGENTS).optional(), // default claude; codex asks for the standing instruction in the result (§11a)
   claude_pid: z.number().int().positive(),
   session_id: z.string().min(1),
   source: z.enum(['startup', 'resume', 'clear', 'compact', 'fork']).optional(), // event=start
@@ -49,9 +50,10 @@ const zSessionEvent = z.object({
 
 /** Plugin MCP server → bridge. */
 const zRegister = z.object({
-  claude_pid: z.number().int().positive(),
+  claude_pid: z.number().int().positive(), // the host process (claude or codex), kept under its original name
+  host: z.enum(HOST_AGENTS).optional(), // default claude
   tag_nonce: z.string().regex(NONCE_RE),
-  inbox: z.object({ socket: z.string().min(1), token: z.string().min(1) }),
+  inbox: z.object({ socket: z.string().min(1), token: z.string().min(1) }).optional(), // Claude Code only (§11.3); Codex posts with codex queue
   plugin_version: z.string(),
   cwd: z.string().optional(),
 });
@@ -73,7 +75,7 @@ export const toolParams = {
 } as const;
 
 /** Bridge → plugin: posts to put into the session inbox, in order, >= 200 ms apart. Each text is unique (§8.1). */
-const zDeliverEvt = z.object({ items: z.array(z.object({ post_id: zUlid, text: z.string() })).min(1) });
+const zDeliverEvt = z.object({ items: z.array(z.object({ post_id: zUlid, text: z.string() })).min(1), thread_id: z.string().min(1).optional() }); // thread_id: Codex session to queue into (§11a)
 /** Plugin → bridge: outcome of one inbox write. Writes never report delivery (§11.3), so ok=true means handed_off. */
 const zPostResult = z.object({ post_id: zUlid, ok: z.boolean(), error: z.string().optional() });
 
@@ -91,7 +93,7 @@ export type CliMethod = keyof typeof CLI_METHODS;
 export const IPC_METHODS = {
   hello: { params: zHello, result: zHelloResult, auth: 'none' },
   ping: { params: z.object({}).optional(), result: z.object({ t: z.number() }), auth: 'none' },
-  session_event: { params: zSessionEvent, result: z.object({ ok: z.literal(true) }), auth: 'hook' },
+  session_event: { params: zSessionEvent, result: z.object({ ok: z.literal(true), context: z.string().optional() }), auth: 'hook' },
   register_session: { params: zRegister, result: zRegisterResult, auth: 'none' },
   reconnect_session: { params: zReconnect, result: zRegisterResult, auth: 'none' },
   post_result: { params: zPostResult, result: z.object({ ok: z.literal(true) }), auth: 'participant' },

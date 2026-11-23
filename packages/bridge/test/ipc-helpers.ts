@@ -60,6 +60,9 @@ export function cleanup(h: IpcHarness): void { rmSync(h.root, { recursive: true,
 /** A simulated plugin MCP server: registers, answers deliver events, records posts, calls tools. */
 export class FakePlugin {
   readonly posts: string[] = [];
+  /** thread_id of each deliver event (Codex, §11a); undefined for Claude Code. */
+  readonly threads: Array<string | undefined> = [];
+  host: 'claude' | 'codex' = 'claude';
   readonly events: Array<{ method: string; params: unknown }> = [];
   client!: IpcClient;
   nonce = newNonce();
@@ -68,12 +71,14 @@ export class FakePlugin {
   readonly socketPath: string; readonly claudePid: number;
   private constructor(socketPath: string, claudePid: number) { this.socketPath = socketPath; this.claudePid = claudePid; }
 
-  static async connect(h: IpcHarness, claudePid: number, o: { cwd?: string; register?: boolean } = {}): Promise<FakePlugin> {
+  static async connect(h: IpcHarness, claudePid: number, o: { cwd?: string; register?: boolean; host?: 'claude' | 'codex' } = {}): Promise<FakePlugin> {
     const p = new FakePlugin(h.svc.paths.socket, claudePid);
+    if (o.host) p.host = o.host;
     p.client = await IpcClient.open(h.svc.paths.socket, 'plugin');
     p.client.on('replaced', (params) => { p.events.push({ method: 'replaced', params }); });
     p.client.on('deliver', (params) => {
-      const { items } = params as { items: Array<{ post_id: string; text: string }> };
+      const { items, thread_id } = params as { items: Array<{ post_id: string; text: string }>; thread_id?: string };
+      p.threads.push(thread_id);
       for (const it of items) {
         if (!p.failPosts) p.posts.push(it.text);
         void p.client.request('post_result', { post_id: it.post_id, ok: !p.failPosts, ...(p.failPosts ? { error: 'inbox write failed' } : {}) }).catch(() => {});
@@ -84,7 +89,7 @@ export class FakePlugin {
   }
 
   async register(cwd?: string): Promise<void> {
-    this.reg = await this.client.request('register_session', { claude_pid: this.claudePid, tag_nonce: this.nonce, inbox: { socket: '/tmp/x.sock', token: 't' }, plugin_version: '0.1.0', ...(cwd ? { cwd } : {}) });
+    this.reg = await this.client.request('register_session', { claude_pid: this.claudePid, tag_nonce: this.nonce, ...(this.host === 'codex' ? { host: 'codex' } : { inbox: { socket: '/tmp/x.sock', token: 't' } }), plugin_version: '0.1.0', ...(cwd ? { cwd } : {}) });
   }
 
   tool(name: string, params: unknown): Promise<ToolResult> { return this.client.request<ToolResult>(`tool.${name}`, params); }

@@ -18,6 +18,9 @@ export const LIMITS = {
   grokRoundTripMs: 90_000, // setup round-trip check waits this long for the run's bridge_send (§12.5)
   relayResultBytes: 64 * 1024, // bridge keeps each Grok tool result (relay `res`) under this; reads page beyond it (§12.3)
   grokSerializeAfterMs: 5 * 60 * 1000,
+  unknownModePopupMs: 30 * 1000, // popup when a delivery waits this long on a session that hasn't reported its mode
+  titleRefreshMs: 15 * 1000,
+  codexContextWaitMs: 3000, // Codex SessionStart hook waits this long for the MCP server to register (§11a) // re-read a session's Claude Code title at most this often
   invitesPendingPerRemote: 3,
   invitesPendingPerTarget: 10,
   inviteCooldownMs: 10 * 60 * 1000,

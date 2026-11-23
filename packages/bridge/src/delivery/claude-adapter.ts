@@ -1,4 +1,4 @@
-// Claude Code deliveries (§11.3): render an OutboundItem with the session's tag nonce (§8.1) and hand it to the
+// Claude Code and Codex deliveries (§11.3, §11a): render an OutboundItem with the session's tag nonce (§8.1) and hand it to the
 // session's live plugin connection (LinkLookup). Inbox writes never report delivery, so success = handed_off.
 import { renderMessage, renderNotice, ulid, LIMITS, type Adapter, type AdapterCapabilities, type DeliverOutcome, type DoctorCheck, type LinkLookup, type OutboundItem, type ParticipantRef } from '@agentbridge/protocol';
 
@@ -29,6 +29,8 @@ export class ClaudeLinkAdapter implements Adapter {
   async deliver(item: OutboundItem, to: ParticipantRef): Promise<DeliverOutcome> {
     const link = this.lookup(to.participant_id);
     if (!link || !to.tag_nonce) return { status: 'queued' };
+    // Codex: the plugin posts with `codex queue --thread <session id>`, so the id must be known (SessionStart hook)
+    if (to.agent === 'codex' && !to.session_id) return { status: 'queued' };
     const text = renderClaudePost(item, to.tag_nonce);
     const post_id = ulid();
     // pace posts per session (Claude Code rate-limits per sender, §11.3); the pipeline is serial per participant
@@ -36,7 +38,7 @@ export class ClaudeLinkAdapter implements Adapter {
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     this.lastPost.set(to.participant_id, Date.now());
     let res: Array<{ post_id: string; ok: boolean; error?: string }>;
-    try { res = await link.deliver([{ post_id, text }]); }
+    try { res = await link.deliver([{ post_id, text }], to.agent === 'codex' ? { thread_id: to.session_id! } : {}); }
     catch { return { status: 'queued' }; } // connection dropped mid-delivery: redeliver on reconnect (at-least-once)
     const r = res.find((x) => x.post_id === post_id);
     if (r?.ok) return { status: 'handed_off' };

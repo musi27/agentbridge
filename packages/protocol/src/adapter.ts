@@ -4,8 +4,10 @@ import type { NoticePart } from './framing.ts';
 
 export interface ParticipantRef {
   participant_id: string; address: string; agent: AgentType;
-  /** Claude: tag nonce for framing. Grok: unused. */
+  /** Claude/Codex: tag nonce for framing. Grok: unused. */
   tag_nonce?: string;
+  /** Codex: the session (thread) id that `codex queue` posts into (§11a). */
+  session_id?: string;
 }
 
 export interface OutboundMessage { message_id: string; seq: number; turn?: number; from_address: string; body: string; in_reply_to?: string; created_at: string }
@@ -51,6 +53,6 @@ export interface Adapter {
 /** A live plugin connection for one Claude participant, owned by the bridge's IPC server (§11.3).
  *  `deliver` sends the `deliver` event and resolves with each post's `post_result`. */
 export interface ParticipantLink {
-  deliver(items: Array<{ post_id: string; text: string }>): Promise<Array<{ post_id: string; ok: boolean; error?: string }>>;
+  deliver(items: Array<{ post_id: string; text: string }>, opts?: { thread_id?: string }): Promise<Array<{ post_id: string; ok: boolean; error?: string }>>;
 }
 export type LinkLookup = (participant_id: string) => ParticipantLink | null;

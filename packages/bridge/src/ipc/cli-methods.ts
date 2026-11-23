@@ -108,7 +108,7 @@ export async function handleCli(ctx: CliContext, method: CliMethod, raw: unknown
       return ok({
         bridge_version: BRIDGE_VERSION, pid: ctx.pid ?? process.pid, started_at: ctx.startedAt ? new Date(ctx.startedAt).toISOString() : null,
         policy: ps.ok ? { ok: true, version: ps.version, mode: ps.policy.approval.mode } : { ok: false, reason: ps.reason, detail: ps.detail },
-        participants: parts.map((x) => ({ address: `${x.agent}:${x.name}`, short_id: shortId(x.id), state: x.state, permission_mode: x.permission_mode, ...(x.cwd ? { folder: basename(x.cwd) } : {}) })),
+        participants: parts.map((x) => ({ address: `${x.agent}:${x.name}`, ...(x.title ? { title: x.title } : {}), short_id: shortId(x.id), state: x.state, permission_mode: x.permission_mode, ...(x.cwd ? { folder: basename(x.cwd) } : {}) })),
         auto_mode_sessions: parts.filter((x) => x.permission_mode === 'auto').map((x) => `${x.agent}:${x.name}`),
         conversations: { pending: convs.filter((c) => c.state === 'pending').length, active: convs.filter((c) => c.state === 'active').length, ended: convs.filter((c) => c.state === 'ended').length },
         queued_deliveries: store.pendingDeliveries().length,
@@ -118,7 +118,7 @@ export async function handleCli(ctx: CliContext, method: CliMethod, raw: unknown
       });
     }
     case 'cli.agents':
-      return ok(store.participants().map((x) => ({ address: `${x.agent}:${x.name}`, short_id: shortId(x.id), state: x.state, permission_mode: x.permission_mode, ...(x.cwd ? { folder: basename(x.cwd) } : {}), session_id: x.session_id })));
+      return ok(store.participants().map((x) => ({ address: `${x.agent}:${x.name}`, ...(x.title ? { title: x.title } : {}), short_id: shortId(x.id), state: x.state, permission_mode: x.permission_mode, ...(x.cwd ? { folder: basename(x.cwd) } : {}), session_id: x.session_id })));
     case 'cli.conversations':
       return ok(store.conversations().map((c) => ({
         id: c.id, initiator: addr(c.initiator_id), invitee: addr(c.invitee_id), topic: c.topic, state: c.state, end_reason: c.end_reason,
@@ -160,8 +160,8 @@ export async function handleCli(ctx: CliContext, method: CliMethod, raw: unknown
       const r = resolveAddress(store.participants().map((x) => ({ id: x.id, agent: x.agent, name: x.name, state: x.state, cwd: x.cwd })), String(p['address']), { local: true });
       if (!r.ok) return bad(r.reason, r.reason === 'recipient_ambiguous' ? `ambiguous: ${r.candidates!.map((c) => `${c.address} (${c.short_id}${c.folder ? `, ${c.folder}` : ''})`).join('; ')}` : 'no such participant');
       const x = store.participant(r.id)!;
-      if (x.agent !== 'claude' || !x.session_id) return bad('invalid_message', 'only Claude Code sessions with a known session id can be reopened');
-      return ok({ command: `claude --resume ${x.session_id}`, cwd: x.cwd });
+      if ((x.agent !== 'claude' && x.agent !== 'codex') || !x.session_id) return bad('invalid_message', 'only Claude Code and Codex sessions with a known session id can be reopened');
+      return ok({ command: x.agent === 'codex' ? `codex resume ${x.session_id}` : `claude --resume ${x.session_id}`, cwd: x.cwd });
     }
     case 'cli.config_get': {
       const ps = engine.policyStore.current();
