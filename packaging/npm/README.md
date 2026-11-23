@@ -25,6 +25,16 @@ Then connect a Grok bot (about 4 minutes): `agentbridge add grok`.
 
 First try: open a Claude Code session and ask "use agentbridge to list the agents you can talk to".
 
+## Uninstall
+
+```bash
+agentbridge uninstall               # add --purge-data to also delete ~/.agentbridge and the keychain items
+npm uninstall -g @musi27/agentbridge
+```
+
+`uninstall` needs one Touch ID / password check and works with the bridge stopped. It removes the plugin, the login
+service and the deny rules, and prints what is left for you to do in Grok (delete the connector and the routine).
+
 ## Notes
 
 - The bundled `agentbridge-helper` (Touch ID and keychain access) is ad-hoc signed, not notarized. npm installs are not

@@ -17,6 +17,7 @@ import { IpcClient } from '../ipc/client.ts';
 import { acquireLock } from '../service.ts';
 import type { Paths } from '../paths.ts';
 import { MARKETPLACE_NAME, type ClaudeRunner, type InitDeps, type PolicyAccess, type Prompter } from './init.ts';
+import type { UninstallDeps } from './uninstall.ts';
 
 const launchctlAt = (bin: string) => (args: string[]): Promise<{ code: number; out: string }> => new Promise((res) => {
   execFile(bin, args, { timeout: 30_000, encoding: 'utf8' }, (e, stdout, stderr) => res({ code: e ? (typeof (e as { code?: unknown }).code === 'number' ? (e as { code: number }).code : 1) : 0, out: `${stderr}${stdout}`.trim().slice(0, 4000) }));
@@ -162,6 +163,32 @@ export function realInitDeps(i: RealDepsInput): InitDeps {
     home: env['HOME'] ?? process.env['HOME'] ?? '/',
     service_entry: { entry: serviceEntry(), logDir: i.paths.logsDir },
     launchPaths: () => resolveLaunchPaths({ pathVar: env['PATH'], home: env['HOME'] ?? homedir(), execPath: process.execPath }),
+  };
+}
+
+export interface RealUninstallInput {
+  paths: Paths; presence: PresenceChecker;
+  service: UninstallDeps['service'];
+  /** Opened only for --purge-data. */
+  secrets(): Promise<SecretStore>;
+  print(line: string): void; env?: NodeJS.ProcessEnv;
+  /** Tests: a fake `claude`. */
+  claudeBin?: string;
+}
+
+export function realUninstallDeps(i: RealUninstallInput): UninstallDeps {
+  const env = i.env ?? process.env;
+  return {
+    presence: i.presence, service: i.service, secrets: i.secrets, paths: i.paths, print: i.print,
+    claude: claudeRunner(i.claudeBin),
+    claudeSettingsPath: userSettingsPath(env),
+    lockPid: () => liveLockPid(i.paths.lock, pidAlive),
+    stopForeignBridge: (pid) => stopForeignBridge(pid),
+    marker: {
+      write: () => { mkdirSync(i.paths.runDir, { recursive: true, mode: 0o700 }); writeFileSync(join(i.paths.runDir, SETUP_MARKER_FILE), formatSetupMarker(process.pid, Date.now()), { mode: 0o600 }); },
+      remove: () => { rmSync(join(i.paths.runDir, SETUP_MARKER_FILE), { force: true }); },
+    },
+    homeDir: env['HOME'] ?? homedir(),
   };
 }
 

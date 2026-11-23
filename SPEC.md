@@ -552,6 +552,7 @@ Structured JSON with separate fields for the message, transcript and notices (§
 - `add grok`
 - `show`, `end`, `stop`
 - `identity rotate`, `purge`
+- `uninstall` (the CLI runs this check itself: it must work without a running bridge)
 
 **Unprivileged:** `status`, `agents`, `conversations` (metadata only), `doctor`, `logs` (no bodies), `start`, `open`.
 
@@ -680,7 +681,7 @@ All prefixed `bridge_`.
 | `bridge_get_transcript(conversation_id)` | no | Participants only |
 
 **Deny rules written by `init`:**
-- `Bash(agentbridge config:*)`, `Bash(agentbridge approve:*)`, `Bash(agentbridge decline:*)`, `Bash(agentbridge extend:*)`, `Bash(agentbridge revoke:*)`, `Bash(agentbridge remove:*)`, `Bash(agentbridge add:*)`, `Bash(agentbridge purge:*)`, `Bash(agentbridge identity:*)`, `Bash(agentbridge show:*)`, `Bash(agentbridge end:*)`, `Bash(agentbridge stop:*)`
+- `Bash(agentbridge config:*)`, `Bash(agentbridge approve:*)`, `Bash(agentbridge decline:*)`, `Bash(agentbridge extend:*)`, `Bash(agentbridge revoke:*)`, `Bash(agentbridge remove:*)`, `Bash(agentbridge add:*)`, `Bash(agentbridge purge:*)`, `Bash(agentbridge identity:*)`, `Bash(agentbridge show:*)`, `Bash(agentbridge end:*)`, `Bash(agentbridge stop:*)`, `Bash(agentbridge uninstall:*)`
 - writes and edits under `~/.agentbridge/**`
 
 These are defence in depth, and incomplete by design (M0, V4).
@@ -954,6 +955,7 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
 | `agentbridge start` | no | Start the service |
 | `agentbridge stop` | yes | Stop the service |
 | `agentbridge logs` | no | Logs (never bodies) |
+| `agentbridge uninstall [--purge-data]` | yes | Undo `init` (§14.1); works without a running bridge |
 
 ### 14.1 Install and `init`
 
@@ -969,6 +971,14 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
 7. Run `doctor`. Print a first try.
 
 **Target:** < 10 minutes, excluding Grok setup. Grok setup measured ≈ 4 minutes in M0 (V14).
+
+**`uninstall`** undoes `init`. It needs user presence, which the CLI checks itself (the bridge may be down), and it never needs the bridge. Re-running it is safe: steps already done report "absent". It prints what it removed and what it left.
+1. Write the setup marker, so the plugin's on-demand start waits.
+2. `claude plugin uninstall agentbridge@agentbridge --scope user`, then `claude plugin marketplace remove agentbridge` ("not found" counts as done).
+3. Boot out the launchd agent and delete its plist. Stop a bridge still holding the lock (only if it is an agentbridge bridge).
+4. Remove exactly the deny rules `init` wrote from the user's Claude Code settings; every other setting stays.
+5. With `--purge-data` only: delete the Keychain items under service `agentbridge` (identity, policy and per-bot names; bot ids come from the database), then `~/.agentbridge`. It refuses to delete a folder that is the home folder, one of its parents, or doesn't look like an agentbridge folder. Without the flag both are reported as left.
+6. Print the steps it can't do: delete the connector and routine in Grok, then `npm uninstall -g @musi27/agentbridge`, last.
 
 ---
 

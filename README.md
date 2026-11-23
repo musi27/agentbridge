@@ -190,6 +190,33 @@ Useful commands:
 
 The full list is in [SPEC.md §14](SPEC.md#14-cli). For problems, see [docs/troubleshooting.md](docs/troubleshooting.md).
 
+## Uninstall
+
+```bash
+agentbridge uninstall
+```
+
+It needs Touch ID or your password, works whether or not the bridge is running, and is safe to run again. It removes
+the Claude Code plugin and its marketplace, the launchd agent, and the deny rules `init` added to your Claude Code
+settings (nothing else in that file changes), and stops a running bridge. It keeps your data (`~/.agentbridge`) and the
+Keychain items under service `agentbridge` unless you add `--purge-data`:
+
+```bash
+agentbridge uninstall --purge-data
+```
+
+It prints what it removed and what it left. Then, yourself:
+
+1. In Grok, delete the agentbridge connector and the agentbridge routine for each bot you connected.
+2. Remove the package, last:
+
+```bash
+npm uninstall -g @musi27/agentbridge
+```
+
+If the Touch ID helper is missing, follow the manual steps in
+[docs/troubleshooting.md](docs/troubleshooting.md#uninstall).
+
 ## How approvals work
 
 Every conversation needs one local approval from you (in the default `per_conversation` mode), plus one more for each
@@ -249,8 +276,8 @@ edits under `~/.agentbridge/**`. Plain reads of `~/.agentbridge` are not denied.
 that form fails too.)
 
 **User presence is the real barrier.** Privileged commands (`config set`, `approve`, `decline`, `extend`, `revoke`,
-`remove`, `add grok`, `show`, `end`, `stop`, `identity rotate`, `purge`) always require Touch ID or your account
-password, checked by the bridge itself. The bridge also detects casual edits to its policy and stops all conversation
+`remove`, `add grok`, `show`, `end`, `stop`, `identity rotate`, `purge`, `uninstall`) always require Touch ID or your
+account password, checked by the bridge itself (`uninstall` checks it in the CLI, so it works with the bridge stopped). The bridge also detects casual edits to its policy and stops all conversation
 activity when it finds one.
 
 **Data can leave through a conversation.** Sending messages is not gated, so a manipulated remote agent could talk a

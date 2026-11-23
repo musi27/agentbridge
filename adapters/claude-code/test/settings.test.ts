@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, statSync, writeFileSync, chmodSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { DENY_RULES, bareModeConfigured, checkDenyRules, installDenyRules, readEffectiveCrossSessionInbound } from '../src/settings.ts';
+import { DENY_RULES, bareModeConfigured, checkDenyRules, installDenyRules, removeDenyRules, readEffectiveCrossSessionInbound } from '../src/settings.ts';
 import { tempDir } from './helpers.ts';
 
 interface Layout { managed?: unknown; dropIns?: Record<string, unknown>; flag?: unknown; user?: unknown; project?: unknown; local?: unknown }
@@ -63,9 +63,9 @@ test('crossSessionInbound: readings report what was found, including malformed f
   assert.ok(r.readings.some((x) => x.source === 'projectSettings' && x.value === 'hold'));
 });
 
-test('deny rules: §11.4 list (12 Bash prefixes + Edit on ~/.agentbridge)', () => {
-  assert.equal(DENY_RULES.length, 13);
-  for (const s of ['config', 'approve', 'decline', 'extend', 'revoke', 'remove', 'add', 'purge', 'identity', 'show', 'end', 'stop']) {
+test('deny rules: §11.4 list (13 Bash prefixes + Edit on ~/.agentbridge)', () => {
+  assert.equal(DENY_RULES.length, 14);
+  for (const s of ['config', 'approve', 'decline', 'extend', 'revoke', 'remove', 'add', 'purge', 'identity', 'show', 'end', 'stop', 'uninstall']) {
     assert.ok(DENY_RULES.includes(`Bash(agentbridge ${s}:*)`), s);
   }
   assert.ok(DENY_RULES.includes('Edit(~/.agentbridge/**)'));
@@ -168,4 +168,26 @@ test('regression: a failed write leaves no temp file behind', async (t) => {
   try { assert.throws(() => installDenyRules(p)); } finally { chmodSync(sub, 0o700); }
   assert.deepEqual(readdirSync(sub), ['settings.json']);
   assert.equal(readFileSync(p, 'utf8'), '{}');
+});
+
+test('removeDenyRules: removes only the §11.4 rules, keeps every other setting; idempotent; missing file is a no-op', (t) => {
+  const { dir, cleanup } = tempDir(); t.after(cleanup);
+  const p = join(dir, 'settings.json');
+  assert.deepEqual(removeDenyRules(p), { path: p, removed: [] });
+  assert.equal(existsSync(p), false);
+  const original = { model: 'opus', env: { A: '1' }, permissions: { allow: ['Bash(ls)'], deny: ['Bash(rm:*)', 'Bash(agentbridge-other:*)'], defaultMode: 'default' }, hooks: { Stop: [] } };
+  writeFileSync(p, JSON.stringify(original, null, 2)); chmodSync(p, 0o640);
+  installDenyRules(p);
+  const r = removeDenyRules(p);
+  assert.equal(r.removed.length, DENY_RULES.length);
+  assert.deepEqual(JSON.parse(readFileSync(p, 'utf8')), original);
+  assert.equal(statSync(p).mode & 0o777, 0o640);
+  assert.deepEqual(removeDenyRules(p).removed, []);
+  // an older init's 13 rules (no uninstall rule) are removed too
+  writeFileSync(p, JSON.stringify({ permissions: { deny: DENY_RULES.filter((x) => !x.includes('uninstall')) } }));
+  assert.equal(removeDenyRules(p).removed.length, DENY_RULES.length - 1);
+  assert.deepEqual(JSON.parse(readFileSync(p, 'utf8')), { permissions: { deny: [] } });
+  writeFileSync(p, '{bad');
+  assert.throws(() => removeDenyRules(p));
+  assert.equal(readFileSync(p, 'utf8'), '{bad');
 });

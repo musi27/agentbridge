@@ -13,8 +13,8 @@ import { addGrokFlow, printRoundTrip, revokeGrokFlow, terminalIo, type Io } from
 import type { RoundTripResult } from '../grok/setup.ts';
 import type { RelayRuntime as RelayRuntimeT } from '../relay/runtime.ts';
 
-export const PRIVILEGED = new Set(['config set', 'config verify', 'approve', 'decline', 'extend', 'revoke', 'remove', 'add', 'show', 'end', 'stop', 'identity', 'purge']);
-export const COMMANDS = ['status', 'agents', 'conversations', 'doctor', 'logs', 'open', 'start', 'stop', 'config', 'approve', 'decline', 'extend', 'end', 'show', 'remove', 'revoke', 'add', 'identity', 'purge', 'init', 'serve', 'help'];
+export const PRIVILEGED = new Set(['config set', 'config verify', 'approve', 'decline', 'extend', 'revoke', 'remove', 'add', 'show', 'end', 'stop', 'identity', 'purge', 'uninstall']);
+export const COMMANDS = ['status', 'agents', 'conversations', 'doctor', 'logs', 'open', 'start', 'stop', 'config', 'approve', 'decline', 'extend', 'end', 'show', 'remove', 'revoke', 'add', 'identity', 'purge', 'init', 'uninstall', 'serve', 'help'];
 
 export interface Parsed { cmd: string; args: string[]; json: boolean; home?: string }
 export class UsageError extends Error {}
@@ -56,6 +56,7 @@ Privileged (Touch ID / password, checked by the bridge):
   approve <id> | decline <id> | extend <id> <n> | end <id> | end --inactive <duration> | show <id>
   config set <key> <value> | config verify [show|reapprove|restore] | remove <address> | purge [--before <duration>] | stop
   add grok | revoke grok:<name> | identity rotate (M2)
+  uninstall [--purge-data]   remove the plugin, login agent and deny rules (works without a running bridge)
 Global options (after the subcommand for privileged commands): --json, --home <dir>`;
 
 type Print = (s: string) => void;
@@ -265,12 +266,37 @@ async function init(home: string | undefined, args: readonly string[], print: Pr
   return report.ok ? 0 : 1;
 }
 
+/** `agentbridge uninstall` flags. */
+export function parseUninstallArgs(args: readonly string[]): import('../init/uninstall.ts').UninstallOptions {
+  const o: import('../init/uninstall.ts').UninstallOptions = {};
+  for (const a of args) {
+    if (a === '--purge-data') o.purgeData = true;
+    else throw new UsageError(`unknown uninstall option ${a} (usage: agentbridge uninstall [--purge-data])`);
+  }
+  return o;
+}
+
+async function uninstall(home: string | undefined, args: readonly string[], json: boolean, print: Print): Promise<number> {
+  const opts = parseUninstallArgs(args);
+  const { runUninstall } = await import('../init/uninstall.ts');
+  const { realUninstallDeps } = await import('../init/deps.ts');
+  const presence = await import('@agentbridge/presence');
+  let checker;
+  try { checker = await presence.createPresenceChecker(); }
+  catch (e) { print(`agentbridge uninstall: ${(e as Error).message}\nThe Touch ID helper is needed to confirm it is you. To remove agentbridge by hand, follow docs/troubleshooting.md ("Uninstall").`); return 1; }
+  const out: string[] = [];
+  const report = await runUninstall(realUninstallDeps({ paths: resolvePaths(home), presence: checker, service: new presence.LaunchdServiceManager(), secrets: () => presence.createSecretStore(), print: json ? (l) => out.push(l) : print }), opts);
+  if (json) print(JSON.stringify(report, null, 2));
+  return report.ok ? 0 : 1;
+}
+
 export async function main(argv: readonly string[], print: Print = (s) => process.stdout.write(`${s}\n`), printErr: Print = (s) => process.stderr.write(`${s}\n`), io?: Io): Promise<number> {
   let p: Parsed;
   try { p = parseArgs(argv); } catch (e) { printErr(`agentbridge: ${(e as Error).message}`); return 2; }
   try {
     if (p.cmd === 'help' || p.cmd === '--help') { print(HELP); return 0; }
     if (p.cmd === 'init') return await init(p.home, p.args, print);
+    if (p.cmd === 'uninstall') return await uninstall(p.home, p.args, p.json, print);
     if (p.cmd === 'start') { print(await startDetached(p.home)); return 0; }
     if (p.cmd === 'serve') { await serve(p.home, print); return -1; }
     const req = toRequest(p);

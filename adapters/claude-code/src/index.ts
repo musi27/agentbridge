@@ -2,7 +2,7 @@
 export { ClaudeCodeAdapter, parseVersion, versionAtLeast } from './adapter.ts';
 export type { ClaudeCodeAdapterOptions } from './adapter.ts';
 export {
-  readEffectiveCrossSessionInbound, claudeSettingsFiles, inboundFix, installDenyRules, checkDenyRules, bareModeConfigured,
+  readEffectiveCrossSessionInbound, claudeSettingsFiles, inboundFix, installDenyRules, removeDenyRules, checkDenyRules, bareModeConfigured,
   DENY_RULES, INBOUND_VALUES, MACOS_MANAGED_DIR,
 } from './settings.ts';
 export type { EffectiveInbound, InboundValue, SettingsFiles, SettingsPathOptions, SourceReading, DenyRuleStatus } from './settings.ts';

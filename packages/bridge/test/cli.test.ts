@@ -4,7 +4,7 @@ import { parseArgs, toRequest, main, UsageError, PRIVILEGED } from '../src/cli/m
 import { ipcHarness, cleanup } from './ipc-helpers.ts';
 
 test('§11.4: global flags before a privileged subcommand are rejected; after it they are fine', () => {
-  for (const argv of [['--json', 'approve', 'X'], ['--home', '/x', 'config', 'set', 'a', 'b'], ['--home=/x', 'stop'], ['--json', 'config', 'verify'], ['--json', 'end', 'X'], ['--json', 'add', 'grok']]) {
+  for (const argv of [['--json', 'approve', 'X'], ['--home', '/x', 'config', 'set', 'a', 'b'], ['--home=/x', 'stop'], ['--json', 'config', 'verify'], ['--json', 'end', 'X'], ['--json', 'add', 'grok'], ['--json', 'uninstall'], ['--home', '/x', 'uninstall', '--purge-data']]) {
     assert.throws(() => parseArgs(argv), UsageError, argv.join(' '));
   }
   assert.deepEqual(parseArgs(['approve', 'X', '--json']), { cmd: 'approve', args: ['X'], json: true });
@@ -12,7 +12,8 @@ test('§11.4: global flags before a privileged subcommand are rejected; after it
   assert.deepEqual(parseArgs(['--home', '/h', 'config', 'get']), { cmd: 'config', args: ['get'], json: false, home: '/h' });
   assert.throws(() => parseArgs(['-x', 'approve']), UsageError);
   // the CLI's privileged set matches §9.2
-  assert.deepEqual([...PRIVILEGED].sort(), ['add', 'approve', 'config set', 'config verify', 'decline', 'end', 'extend', 'identity', 'purge', 'remove', 'revoke', 'show', 'stop']);
+  assert.deepEqual([...PRIVILEGED].sort(), ['add', 'approve', 'config set', 'config verify', 'decline', 'end', 'extend', 'identity', 'purge', 'remove', 'revoke', 'show', 'stop', 'uninstall']);
+  assert.deepEqual(parseArgs(['uninstall', '--purge-data', '--home', '/h', '--json']), { cmd: 'uninstall', args: ['--purge-data'], json: true, home: '/h' });
 });
 
 test('cli: commands map to IPC methods', () => {

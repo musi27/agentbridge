@@ -139,7 +139,7 @@ export function inboundFix(e: EffectiveInbound): string {
 // ---------------------------------------------------------------------------------------------------------------
 // Deny rules (§11.4). Defence in depth only: user presence (§9.2) is the real barrier.
 
-const PRIVILEGED_SUBCOMMANDS = ['config', 'approve', 'decline', 'extend', 'revoke', 'remove', 'add', 'purge', 'identity', 'show', 'end', 'stop'] as const;
+const PRIVILEGED_SUBCOMMANDS = ['config', 'approve', 'decline', 'extend', 'revoke', 'remove', 'add', 'purge', 'identity', 'show', 'end', 'stop', 'uninstall'] as const;
 
 /**
  * The deny list `init` writes. "Writes and edits under ~/.agentbridge/**" is a single `Edit(...)` rule:
@@ -199,7 +199,12 @@ export function installDenyRules(path: string = userSettingsPath()): { path: str
   const denyRaw = perms.deny;
   if (denyRaw !== undefined && !Array.isArray(denyRaw)) throw new Error(`${path}: "permissions.deny" is not an array`);
   perms.deny = [...((denyRaw as unknown[] | undefined) ?? []), ...added];
-  const next = { ...data, permissions: perms };
+  writeSettingsObject(path, { ...data, permissions: perms }, existed);
+  return { path, added };
+}
+
+/** Atomic write (temp file + rename) that keeps the file mode and writes through a symlinked settings file. */
+function writeSettingsObject(path: string, next: Record<string, unknown>, existed: boolean): void {
   let mode = 0o600;
   let target = path;
   if (existed) {
@@ -215,7 +220,26 @@ export function installDenyRules(path: string = userSettingsPath()): { path: str
     try { unlinkSync(tmp); } catch { /* nothing to clean up */ }
     throw e;
   }
-  return { path, added };
+}
+
+/**
+ * Remove the §11.4 deny rules `init` wrote (`agentbridge uninstall`), keeping every other setting and rule as is.
+ * Idempotent: a missing file or no matching rules writes nothing. Refuses to touch a file that is not valid JSON.
+ * An emptied `permissions.deny` stays as an empty array, so the file's shape is otherwise unchanged.
+ */
+export function removeDenyRules(path: string = userSettingsPath()): { path: string; removed: string[] } {
+  const { data, existed } = readSettingsObject(path);
+  if (!existed) return { path, removed: [] };
+  const permsRaw = data.permissions;
+  if (!permsRaw || typeof permsRaw !== 'object' || Array.isArray(permsRaw)) return { path, removed: [] };
+  const denyRaw = (permsRaw as Record<string, unknown>).deny;
+  if (!Array.isArray(denyRaw)) return { path, removed: [] };
+  const ours = new Set(DENY_RULES);
+  const removed = DENY_RULES.filter((r) => denyRaw.includes(r));
+  if (removed.length === 0) return { path, removed };
+  const perms = { ...(permsRaw as Record<string, unknown>), deny: denyRaw.filter((x) => !(typeof x === 'string' && ours.has(x))) };
+  writeSettingsObject(path, { ...data, permissions: perms }, existed);
+  return { path, removed };
 }
 
 /** Is Claude Code configured to run in bare mode (`--bare` sets CLAUDE_CODE_SIMPLE=1; plugins' hooks then don't run)? */

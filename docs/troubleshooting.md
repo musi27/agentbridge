@@ -32,6 +32,7 @@ Problems connecting a Grok bot are covered in [setup-grok.md](setup-grok.md#trou
 - [Relay offline or slow](#relay-offline-or-slow)
 - [Touch ID is unavailable](#touch-id-is-unavailable)
 - [The bridge stopped all conversations (policy tamper)](#the-bridge-stopped-all-conversations-policy-tamper)
+- [Uninstall](#uninstall)
 
 ## A Claude session doesn't receive messages (`recipient_unreachable`)
 
@@ -210,3 +211,61 @@ agentbridge config verify
 
 It needs user presence. It shows the current policy against the last verified one; re-approve the current policy if
 you made the change, or restore the last verified one. Then find out what edited the file.
+
+## Uninstall
+
+`agentbridge uninstall` removes the plugin, the launchd agent and the deny rules, and stops the bridge; add
+`--purge-data` to also delete `~/.agentbridge` and the Keychain items. See [the README](../README.md#uninstall). Lines
+marked `FAIL` come with a fix; `absent` means that part was already gone. Running it again is safe.
+
+**By hand.** If `agentbridge uninstall` can't run (for example the Touch ID helper is missing), do the same steps
+yourself:
+
+1. Stop the bridge:
+
+   ```bash
+   agentbridge stop
+   ```
+
+   `stop` needs the Touch ID helper too. If it fails, step 2 stops a bridge launchd runs; quit Claude Code sessions so
+   the plugin doesn't start it again.
+
+2. Remove the launchd agent:
+
+   ```bash
+   launchctl bootout gui/$(id -u)/live.musi.agentbridge
+   ```
+
+   ```bash
+   rm ~/Library/LaunchAgents/live.musi.agentbridge.plist
+   ```
+
+3. Remove the Claude Code plugin and its marketplace:
+
+   ```bash
+   claude plugin uninstall agentbridge@agentbridge
+   ```
+
+   ```bash
+   claude plugin marketplace remove agentbridge
+   ```
+
+4. In `~/.claude/settings.json`, delete the agentbridge entries from `permissions.deny`: every
+   `Bash(agentbridge …:*)` rule and `Edit(~/.agentbridge/**)`. Leave everything else as it is.
+5. Optional, deletes your conversation history and keys: remove the data folder, then the Keychain items. Run the
+   `security` command repeatedly until it says the item could not be found.
+
+   ```bash
+   rm -rf ~/.agentbridge
+   ```
+
+   ```bash
+   security delete-generic-password -s agentbridge
+   ```
+
+6. In Grok, delete the agentbridge connector and the agentbridge routine for each bot.
+7. Last:
+
+   ```bash
+   npm uninstall -g @musi27/agentbridge
+   ```

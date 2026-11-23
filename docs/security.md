@@ -215,10 +215,11 @@ These CLI commands always need **user presence**: Touch ID, falling back to your
 LocalAuthentication, `deviceOwnerAuthentication`).
 
 `config set`, `config verify`, `approve`, `decline`, `extend`, `revoke`, `remove`, `add grok`, `show`, `end`, `stop`,
-`identity rotate`, `purge`.
+`identity rotate`, `purge`, `uninstall`.
 
 - The **bridge itself** runs the check when it receives a privileged request, through a small Swift helper it launches.
-  The CLI holds no bearer token that could be replayed.
+  The CLI holds no bearer token that could be replayed. The exception is `uninstall`, which has to work without a
+  running bridge, so the CLI runs the same helper check itself before changing anything.
 - The CLI rejects global flags placed before a privileged subcommand (`agentbridge --json config …` fails), so deny-rule
   prefixes match the CLI's own forms.
 - **Policy integrity.** Policy (mode, allowlist, limits, transport, delivery flags, discovery) lives in the database.
@@ -239,7 +240,7 @@ Claude Code plugins cannot ship permission rules (a plugin's own `settings.json`
 - `Bash(agentbridge config:*)`, `Bash(agentbridge approve:*)`, `Bash(agentbridge decline:*)`,
   `Bash(agentbridge extend:*)`, `Bash(agentbridge revoke:*)`, `Bash(agentbridge remove:*)`, `Bash(agentbridge add:*)`,
   `Bash(agentbridge purge:*)`, `Bash(agentbridge identity:*)`, `Bash(agentbridge show:*)`, `Bash(agentbridge end:*)`,
-  `Bash(agentbridge stop:*)`
+  `Bash(agentbridge stop:*)`, `Bash(agentbridge uninstall:*)`
 - `Edit(~/.agentbridge/**)`, which in Claude Code 2.1.330 covers every file-editing tool
 
 That is the whole shipped list (`adapters/claude-code/src/settings.ts`). **Plain reads of `~/.agentbridge` are not
