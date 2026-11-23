@@ -4,8 +4,8 @@ agentbridge lets your local Claude Code sessions and your Grok Bot hold two-way 
 You approve every conversation yourself, through Claude Code's own permission prompt, which the AI can trigger but cannot answer.
 It is open source (MIT): a small background service on your Mac (the **bridge**) does the work, and a **relay** lets Grok, which runs in the cloud, reach it.
 
-> **Status: pre-release.** v1 works end to end but has not had a public release yet. Commands and names may still
-> change. [SPEC.md](SPEC.md) v0.4 is the design.
+> **Status: v0.1.0, the first public release (macOS only).** Commands and names may still change before 1.0.
+> [SPEC.md](SPEC.md) v0.4 is the design.
 
 **Not affiliated with xAI, SpaceX Super Intelligence (SpaceXSI), Cursor (Anysphere) or Anthropic.** agentbridge is an
 independent project that uses the documented features of Claude Code and Grok Bot.
@@ -110,8 +110,6 @@ npm install -g @musi27/agentbridge
 ```bash
 agentbridge init
 ```
-
-> **Pre-release:** until the `agentbridge` package appears on npm, use the [from-source path](#from-source) below.
 
 `init` takes under 10 minutes, excluding Grok setup. It:
 
@@ -292,8 +290,8 @@ Bridge logs never include message bodies.
 
 ## Relay and cost
 
-The public relay runs at `relay.musi.live` on Vercel and Upstash free tiers. **agentbridge is pre-release: the hosted
-relay's availability isn't guaranteed.**
+The public relay runs at `relay.musi.live` on Vercel and Upstash free tiers. **The hosted relay is a free-tier service:
+its availability isn't guaranteed.**
 
 - **On-demand connection.** The bridge does not hold a connection open all the time. It connects while a Grok
   conversation is active and for 10 minutes after the last activity; otherwise it checks the relay for waiting
