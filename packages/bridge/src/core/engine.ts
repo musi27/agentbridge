@@ -24,7 +24,7 @@ import {
   transition, uniqueName, COOLDOWN_END_REASONS,
 } from './rules.ts';
 
-export const BRIDGE_VERSION = '0.1.1';
+export const BRIDGE_VERSION = '0.1.2';
 const LOCAL_AGENTS: ReadonlySet<AgentType> = new Set(['claude', 'fake']);
 const isLocal = (p: ParticipantRow): boolean => LOCAL_AGENTS.has(p.agent);
 const address = (p: ParticipantRow): string => `${p.agent}:${p.name}`;

@@ -4,7 +4,7 @@
 // the same flow carry the setup id they returned (a 256-bit secret, 30 min) instead of asking for presence again.
 import { randomBytes } from 'node:crypto';
 import {
-  GROK_ALLOW_RULE_TOOLS, GROK_ROUTINE_INSTRUCTION, LIMITS, SECRET_NAMES, renderBootstrap, sanitizeLabel, ulid,
+  GROK_ALLOW_RULE_TOOLS, GROK_ROUTINE_INSTRUCTION, LIMITS, SECRET_NAMES, grokMcpPath, renderBootstrap, sanitizeLabel, ulid,
   REASONS, type Adapter, type OutboundItem, type Reason, type SecretStore,
 } from '@agentbridge/protocol';
 import type { Engine } from '../core/engine.ts';
@@ -38,12 +38,23 @@ export interface BeginResult {
   bootstrap: string; instruction: string; allow_rule_tools: readonly string[];
 }
 
-/** Likely causes when the round trip fails, in the order §12.5 lists them. */
-export function roundTripCauses(address: string): string[] {
+/** The MCP connector URL Grok must use for this bot: `<relay origin>/v1/u/<user id>/b/<bot id>/mcp` (§12.5 step 1). */
+export function connectorUrl(relayOrigin: string, userId: string, botId: string): string {
+  return relayOrigin.replace(/\/+$/, '') + grokMcpPath(userId, botId);
+}
+
+/**
+ * Likely causes when the round trip fails, in the order §12.5 lists them. With `url`, the connector cause names the
+ * exact connector URL: a connector left over from an earlier identity (agentbridge reinstalled or its data purged)
+ * still passes the relay's token check, so Grok's replies are queued for a bridge that never connects ("waiting to go
+ * out until your computer is back online") while this bridge sees no call at all.
+ */
+export function roundTripCauses(address: string, url?: string): string[] {
   return [
     'The routine instruction is still the placeholder: open "Inbox from agentbridge", paste the instruction again and save. The panel must show text starting "You receive deliveries from agentbridge".',
     `The reply is held on an Auto-review card: look in your Grok chat for an "Allow … to use agentbridge?" card, and make sure the Allow rule covers ${GROK_ALLOW_RULE_TOOLS.join(', ')} on the agentbridge connector.`,
-    `The connector is missing or the token is wrong: check the agentbridge connector (URL and "Authorization: Bearer" token) in Grok. \`agentbridge revoke ${address}\` makes a new token.`,
+    `The connector is missing or the token is wrong: check the agentbridge connector (URL and "Authorization: Bearer" token) in Grok. \`agentbridge revoke ${address}\` makes a new token.`
+      + (url ? ` Its URL must be exactly ${url}. If Grok says the reply is waiting until your computer is back online, the connector still points at an older address (for example from before agentbridge was reinstalled): edit it to this URL, or delete it and add it again.` : ''),
     'The routine is paused: resume "Inbox from agentbridge" in Grok Bot.',
   ];
 }
@@ -216,6 +227,8 @@ export class GrokSetup {
     if (!bot) throw new GrokSetupError('unknown_conversation', 'that address is not a Grok bot');
     if (!adapter) throw new GrokSetupError('internal', 'the Grok adapter is not loaded in this bridge');
     if (!link.configured) throw new GrokSetupError('bridge_offline', 'the relay is not configured on this bridge');
+    const ep = link.endpoint;
+    const url = ep ? connectorUrl(ep.origin, ep.userId, bot.bot_id) : undefined;
     const fail = (stage: Extract<RoundTripResult, { ok: false }>['stage'], detail: string, causes: string[] = [], calls: string[] = []): RoundTripResult =>
       ({ ok: false, address, stage, detail, causes, calls_seen: calls, seconds: secs() });
     if (this.inFlight.has(bot.bot_id)) return fail('busy', 'a round trip for this bot is already running');
@@ -242,7 +255,7 @@ export class GrokSetup {
       }
       if (out.status === 'failed') {
         if (out.retryable) return fail('network', out.hint ?? 'the Grok webhook could not be reached', [`agentbridge could not reach the Grok webhook (${out.hint ?? 'network error'}), so no run started. Check your internet connection, then run \`agentbridge doctor ${address}\`.`]);
-        const causes = roundTripCauses(address);
+        const causes = roundTripCauses(address, url);
         if (/paused/.test(out.hint ?? '')) return fail('webhook', out.hint ?? out.reason, [causes[3]!]);
         return fail('webhook', out.hint ?? out.reason, /key changed|not set up|missing/.test(out.hint ?? '') ? [`Paste the webhook URL and key again: agentbridge add grok (or check them in the routine panel). ${out.hint ?? ''}`.trim()] : causes);
       }
@@ -260,8 +273,8 @@ export class GrokSetup {
       const seen = probe.calls.map((c) => c.method);
       engine.event('warning', 'grok_round_trip_failed', { bot_id: bot.bot_id, calls_seen: seen }, participantId);
       return fail('no_reply', seen.length === 0
-        ? `the run started (${runUuid ?? 'no run id'}) but never called agentbridge`
-        : `the run called ${[...new Set(seen)].join(', ')} but did not reply with bridge_send`, roundTripCauses(address), seen);
+        ? `the run started (${runUuid ?? 'no run id'}) but no agentbridge call from it reached this bridge`
+        : `the run called ${[...new Set(seen)].join(', ')} but did not reply with bridge_send`, roundTripCauses(address, url), seen);
     } finally { watch.done(); this.inFlight.delete(bot.bot_id); }
   }
 }

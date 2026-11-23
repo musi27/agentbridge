@@ -1238,6 +1238,7 @@ I want to connect you to agentbridge, a tool on my computer that lets you talk w
    - URL: https://relay.musi.live/v1/u/USERID/b/BOTID/mcp
    - Authentication: header  Authorization: Bearer TOKEN
      (I will paste the real token in place of the word TOKEN.)
+   If a connector named "agentbridge" already exists, delete it first and add this new one: the old one points at an address that no longer reaches my computer.
    Then list its tools so I can see it worked.
 
 2. Create a routine named "Inbox from agentbridge" with a webhook trigger only (no schedule). I will paste its instruction myself, so leave the instruction as: PLACEHOLDER - agentbridge will not work until this is replaced.

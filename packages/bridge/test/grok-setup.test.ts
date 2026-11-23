@@ -11,7 +11,7 @@ import { openDatabase } from '../src/db/db.ts';
 import { Store } from '../src/db/store.ts';
 import { MemorySecretStore } from '../src/policy/integrity.ts';
 import { RelayLink } from '../src/relay/link.ts';
-import { GrokSetup, GrokSetupError, roundTripCauses } from '../src/grok/setup.ts';
+import { GrokSetup, GrokSetupError, connectorUrl, roundTripCauses } from '../src/grok/setup.ts';
 import { handleCli } from '../src/ipc/cli-methods.ts';
 import { LineSplitter, addGrokFlow, revokeGrokFlow, type Io } from '../src/cli/grok.ts';
 import { ENDPOINT, FakeTransport, errorOf, relayCall, result, simulateRun } from './grok-helpers.ts';
@@ -68,6 +68,8 @@ test('§12.5 begin: mints bot_id and a 256-bit token, stores it, registers token
   assert.equal(x.h.store.bot(b.bot_id)!.token_hash, botTokenHash(b.token));
   assert.ok(b.bootstrap.includes(`https://relay.musi.live/v1/u/${ENDPOINT.userId}/b/${b.bot_id}/mcp`));
   assert.ok(b.bootstrap.includes('Authorization: Bearer TOKEN')); // the user pastes the token over TOKEN
+  // a connector with the same name from an earlier install points at an old identity's address: replace it, never keep it
+  assert.ok(b.bootstrap.includes('If a connector named "agentbridge" already exists, delete it first and add this new one'));
   assert.ok(!b.bootstrap.includes(b.token) && !/[<>]/.test(b.bootstrap));
   assert.equal(b.instruction, GROK_ROUTINE_INSTRUCTION);
   assert.deepEqual([...b.allow_rule_tools], ['bridge_send', 'bridge_get_messages', 'bridge_end_conversation', 'bridge_get_transcript']);
@@ -129,9 +131,13 @@ test('§12.5 round trip failures list the causes in order: placeholder → card/
   assert.equal(silent.ok, false);
   if (!silent.ok) {
     assert.equal(silent.stage, 'no_reply'); assert.deepEqual(silent.calls_seen, []);
-    assert.deepEqual(silent.causes, roundTripCauses('grok:researcher'));
+    assert.deepEqual(silent.causes, roundTripCauses('grok:researcher', connectorUrl(ENDPOINT.origin, ENDPOINT.userId, b.bot_id)));
     assert.match(silent.causes[0]!, /placeholder/); assert.match(silent.causes[1]!, /Auto-review card/); assert.match(silent.causes[2]!, /connector is missing or the token is wrong/); assert.match(silent.causes[3]!, /paused/);
-    assert.match(silent.detail, /never called agentbridge/);
+    assert.match(silent.detail, /no agentbridge call from it reached this bridge/);
+    // a connector left over from an earlier identity (reinstall / purged data) is the silent case seen in the field:
+    // the cause names this bot's exact connector URL and the "back online" text Grok reports for it
+    assert.ok(silent.causes[2]!.includes(`Its URL must be exactly ${ENDPOINT.origin}/v1/u/${ENDPOINT.userId}/b/${b.bot_id}/mcp.`), silent.causes[2]!);
+    assert.match(silent.causes[2]!, /back online/);
   }
   // The read-only run must land inside the budget for calls_seen to show it; 100 ms is too tight on a loaded machine
   // (a run that never replies waits out the whole budget, so keep this window modest).

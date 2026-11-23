@@ -70,7 +70,7 @@ export async function runUninstall(deps: UninstallDeps, o: UninstallOptions = {}
     deps.print(`${LABEL[s.status]}  ${s.detail}${s.fix ? `\n         fix: ${s.fix}` : ''}`);
   };
   const manual = [
-    'In Grok: delete the agentbridge connector and the agentbridge routine for each bot you added (agentbridge cannot reach them).',
+    'In Grok: delete the agentbridge connector and the agentbridge routine for each bot you added (agentbridge cannot reach them). If you reinstall later, a leftover connector keeps sending Grok\'s replies to an address no bridge reads.',
     `Last: npm uninstall -g ${NPM_PACKAGE}`,
   ];
 

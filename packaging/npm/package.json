@@ -1,6 +1,6 @@
 {
   "name": "@musi27/agentbridge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Human-approved two-way conversations between your Claude Code sessions and your Grok Bot (macOS).",
   "license": "MIT",
   "type": "module",
