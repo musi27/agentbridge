@@ -4,7 +4,7 @@
 // the same flow carry the setup id they returned (a 256-bit secret, 30 min) instead of asking for presence again.
 import { randomBytes } from 'node:crypto';
 import {
-  GROK_ALLOW_RULE_TOOLS, GROK_ROUTINE_INSTRUCTION, LIMITS, SECRET_NAMES, grokMcpPath, renderBootstrap, sanitizeLabel, ulid,
+  GROK_ALLOW_RULE_TOOLS, GROK_CONNECTORS_URL, GROK_ROUTINE_INSTRUCTION, LIMITS, SECRET_NAMES, grokMcpPath, renderBootstrap, sanitizeLabel, ulid,
   REASONS, type Adapter, type OutboundItem, type Reason, type SecretStore,
 } from '@agentbridge/protocol';
 import type { Engine } from '../core/engine.ts';
@@ -54,7 +54,7 @@ export function roundTripCauses(address: string, url?: string): string[] {
     'The routine instruction is still the placeholder: open "Inbox from agentbridge", paste the instruction again and save. The panel must show text starting "You receive deliveries from agentbridge".',
     `The reply is held on an Auto-review card: look in your Grok chat for an "Allow … to use agentbridge?" card, and make sure the Allow rule covers ${GROK_ALLOW_RULE_TOOLS.join(', ')} on the agentbridge connector.`,
     `The connector is missing or the token is wrong: check the agentbridge connector (URL and "Authorization: Bearer" token) in Grok. \`agentbridge revoke ${address}\` makes a new token.`
-      + (url ? ` Its URL must be exactly ${url}. If Grok says the reply is waiting until your computer is back online, the connector still points at an older address (for example from before agentbridge was reinstalled): edit it to this URL, or delete it and add it again.` : ''),
+      + (url ? ` Its URL must be exactly ${url}. If Grok says the reply is waiting until your computer is back online, the connector still points at an older address (for example from before agentbridge was reinstalled): edit it to this URL, or delete it yourself at ${GROK_CONNECTORS_URL} (Grok will not delete it) and run \`agentbridge add grok\` again.` : ''),
     'The routine is paused: resume "Inbox from agentbridge" in Grok Bot.',
   ];
 }

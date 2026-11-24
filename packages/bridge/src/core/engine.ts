@@ -575,8 +575,11 @@ export class Engine {
   private listAgents(p: ParticipantRow): ToolResult {
     const local = isLocal(p);
     if (!local && this.policyOrDefault().discovery.relay === 'none') return { status: 'delivered', data: [] };
-    const rows = this.store.participants().filter((x) => x.id !== p.id && x.state !== 'gone');
-    return { status: 'delivered', data: rows.map((x) => ({ address: address(x), ...(x.title ? { title: x.title } : {}), state: x.state, ...(local ? { short_id: shortId(x.id), ...(x.cwd ? { folder: basename(x.cwd) } : {}) } : {}) })) };
+    // A local caller also sees its own entry, marked self: true and listed first, so two sessions in one folder
+    // (claude:x, claude:x-2) can tell which address is theirs. Relay (Grok) callers keep the list without themselves.
+    const rows = this.store.participants().filter((x) => x.state !== 'gone' && (x.id !== p.id || local))
+      .sort((x, y) => Number(y.id === p.id) - Number(x.id === p.id));
+    return { status: 'delivered', data: rows.map((x) => ({ address: address(x), ...(x.id === p.id ? { self: true } : {}), ...(x.title ? { title: x.title } : {}), state: x.state, ...(local ? { short_id: shortId(x.id), ...(x.cwd ? { folder: basename(x.cwd) } : {}) } : {}) })) };
   }
 
   private participantView(): Array<{ id: string; agent: AgentType; name: string; state: string; cwd: string | null }> {

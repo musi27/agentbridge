@@ -4,7 +4,7 @@ agentbridge lets your local Claude Code sessions and your Grok Bot hold two-way 
 You approve every conversation yourself, through Claude Code's own permission prompt, which the AI can trigger but cannot answer.
 It is open source (MIT): a small background service on your Mac (the **bridge**) does the work, and a **relay** lets Grok, which runs in the cloud, reach it.
 
-> **Status: v0.2.2 (macOS only).** Commands and names may still change before 1.0.
+> **Status: v0.2.3 (macOS only).** Commands and names may still change before 1.0.
 > [SPEC.md](SPEC.md) v0.4 is the design.
 
 **Not affiliated with xAI, SpaceX Super Intelligence (SpaceXSI), Cursor (Anysphere) or Anthropic.** agentbridge is an
@@ -220,6 +220,10 @@ agentbridge doctor
 
 `doctor` and `status` warn when the CLI and the running bridge are different versions.
 
+**Grok bots, upgrading to 0.2.3 from an earlier version:** paste the routine instruction again (it now lets Grok search
+the web and X): copy it from [docs/setup-grok.md](docs/setup-grok.md#step-2-of-4-routine-instruction), replace the
+whole instruction of the "Inbox from agentbridge" routine and save.
+
 ## Uninstall
 
 ```bash
@@ -237,7 +241,9 @@ agentbridge uninstall --purge-data
 
 It prints what it removed and what it left. Then, yourself:
 
-1. In Grok, delete the agentbridge connector and the agentbridge routine for each bot you connected.
+1. In Grok, for each bot you connected, delete the `agentbridge` connector at [grok.com/connectors](https://grok.com/connectors)
+   (signed in: open the connector, then remove it) and the "Inbox from agentbridge" routine. Do this yourself: Grok
+   won't delete them when asked.
 2. Remove the package, last:
 
 ```bash
@@ -324,6 +330,9 @@ When you talk to a Grok bot, conversation content leaves your Mac:
 - **Through Cursor (Anysphere) infrastructure.** Grok Bot runs on it: messages to Grok go to the Grok Bot webhook at
   `api2.cursor.sh`, and Grok's calls to the relay come from the same infrastructure. Cursor is not on xAI's published
   subprocessor list. This path is covered by your own Grok Bot and Cursor terms, not by agentbridge.
+- **Into Grok's searches.** While answering, Grok may use its own web and X search. Its queries can contain words from
+  the conversation; the routine instruction forbids secrets, tokens, links from the delivery and private details in
+  them ([docs/security.md](docs/security.md#residual-risks)).
 - **Through the relay.** The relay sees Grok → bridge content in plaintext as it arrives, then seals it to your
   bridge's key before storing it. Sealing protects against a storage leak, not against a malicious relay operator.
   Messages from the bridge to Grok go directly to the webhook, not through the relay.

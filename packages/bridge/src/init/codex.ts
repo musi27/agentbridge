@@ -12,6 +12,17 @@ export const BEGIN = '# >>> agentbridge (managed by `agentbridge add codex`; rem
 export const END = '# <<< agentbridge';
 /** Hook events the bridge needs: lifecycle, the permission mode, and the standing instruction at start. */
 export const CODEX_HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Stop', 'SessionEnd'] as const;
+/**
+ * Each hook's `statusMessage`: Codex shows it as the hook's title in /hooks (else "Unnamed hook") and next to
+ * "Running hook" while a slow one runs. It is part of the hash Codex trusts, so changing a name asks for review again.
+ */
+export const CODEX_HOOK_NAMES: Readonly<Record<(typeof CODEX_HOOK_EVENTS)[number], string>> = {
+  SessionStart: 'agentbridge: register session',
+  UserPromptSubmit: 'agentbridge: report session state',
+  PreToolUse: 'agentbridge: report permission mode',
+  Stop: 'agentbridge: report turn end',
+  SessionEnd: 'agentbridge: unregister session',
+};
 
 export function codexHome(env: Env = process.env): string { return env.CODEX_HOME || join(homedir(), '.codex'); }
 export function codexConfigPath(env: Env = process.env): string { return join(codexHome(env), 'config.toml'); }
@@ -59,17 +70,41 @@ export function codexBlock(nodePath: string, runtimeDir: string): string {
   for (const ev of CODEX_HOOK_EVENTS) {
     lines.push('', `[[hooks.${ev}]]`);
     if (ev === 'PreToolUse') lines.push('matcher = "^mcp__agentbridge__"');
-    lines.push(`[[hooks.${ev}.hooks]]`, 'type = "command"', `command = ${q(hookCmd)}`, `timeout = ${ev === 'SessionStart' ? 8 : 3}`);
+    lines.push(`[[hooks.${ev}.hooks]]`, 'type = "command"', `command = ${q(hookCmd)}`, `timeout = ${ev === 'SessionStart' ? 8 : 3}`, `statusMessage = ${q(CODEX_HOOK_NAMES[ev])}`);
   }
   lines.push(END);
   return lines.join('\n');
 }
 
-/** Remove the managed block (and the blank line before it). */
+/** Is a `[table]` / `[[array]]` header one of ours? (mcp_servers.agentbridge… or hooks.<one of our events>…) */
+function ownHeader(name: string): boolean {
+  const n = name.replace(/\s+/g, '');
+  if (n === 'mcp_servers.agentbridge' || n.startsWith('mcp_servers.agentbridge.')) return true;
+  return CODEX_HOOK_EVENTS.some((ev) => n === `hooks.${ev}` || n === `hooks.${ev}.hooks`);
+}
+
+/**
+ * Tables inside the markers that we didn't write. Codex appends new tables at the end of config.toml, which is
+ * usually inside our block: trusting the hooks in /hooks adds `[hooks.state."…"]` there, and trusting a folder
+ * adds `[projects."…"]`. They are kept (moved out of the block) so a refresh never drops the user's choices.
+ */
+export function foreignTables(blockBody: string): string {
+  const out: string[] = []; let keep = false;
+  for (const line of blockBody.split('\n')) {
+    const h = /^\s*\[\[?(.+?)\]\]?\s*(?:#.*)?$/.exec(line);
+    if (h) keep = !ownHeader(h[1]!);
+    if (keep) out.push(line);
+  }
+  return out.join('\n').trim();
+}
+
+/** Remove the managed block (and the blank line before it), keeping any tables Codex added inside it. */
 export function stripBlock(text: string): string {
   const b = text.indexOf(BEGIN); if (b < 0) return text;
   const e = text.indexOf(END, b); if (e < 0) throw new Error(`${BEGIN.slice(2, 14)} block has no end marker; fix ${'config.toml'} by hand`);
-  const before = text.slice(0, b).replace(/\n+$/, ''); const after = text.slice(e + END.length).replace(/^\n+/, '');
+  const kept = foreignTables(text.slice(b + BEGIN.length, e));
+  const before = [text.slice(0, b).replace(/\n+$/, ''), kept].filter(Boolean).join('\n\n');
+  const after = text.slice(e + END.length).replace(/^\n+/, '');
   return before + (before && after ? '\n\n' : before ? '\n' : '') + after;
 }
 
@@ -112,7 +147,7 @@ export function removeCodex(o: { env?: Env } = {}): CodexSetupResult {
 /** What the user still has to do in Codex after `add codex`. */
 export const CODEX_NEXT_STEPS = [
   'Next, in Codex (one time):',
-  '  1. Start codex in any folder and run /hooks. Trust the agentbridge hooks: Codex only runs hooks you have reviewed.',
+  '  1. Start codex in any folder and run /hooks. Trust the 5 "agentbridge: …" hooks: Codex only runs hooks you have reviewed.',
   '  2. Leave approvals on (the default). agentbridge refuses approvals made by Codex auto-review (--approve-for-me).',
   'Then any new Codex session can talk to your other agents: ask it to list agents or start a conversation.',
 ];

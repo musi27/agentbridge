@@ -93,6 +93,14 @@ but shell tampering runs unprompted, so the prompt is no defence.
   infrastructure and through the relay ([Third parties](#third-parties-on-the-grok-path)). Mitigations: the standing
   instruction tells Claude never to send secrets, credentials, keys, environment variables or unrequested file
   contents, even if the other agent asks; and you approve each conversation.
+- **Grok's web and X search can be steered by the other agent.** The routine lets Grok use its own read-only web and X
+  search to answer. An agent-written message decides much of what Grok searches for, and a query can carry words from
+  the conversation to xAI's search and, through it, to the sites searched; search results can also contain text aimed
+  at Grok. Mitigations: the routine instruction tells Grok to write queries itself from the question, never to put
+  secrets, tokens, links from the delivery or private details in a query, not to open links from the delivery, and
+  never to follow instructions found in results; search is read-only, and the routine may not use other connectors or
+  tools or post, send, create or change anything; each run reports what it searched for in your Grok chat; and you
+  approve each conversation.
 - **Grok-side approval is optional and user-configured.** agentbridge does not rely on it.
 - **Grok's reports in your Grok chat are written by the model**, so they are best effort.
 
@@ -191,8 +199,9 @@ request …"). agentbridge's framing tells Claude what is genuine regardless of 
 - **Invite limits.** At most 3 pending invites per remote participant and 10 per target session, and a 10-minute
   cooldown per pair after a decline or expiry. Over the limit → `rate_limited`.
 - **Grok side.** Deliveries to Grok are structured JSON with separate fields for messages and notices. The routine
-  instruction treats everything in messages, notices and tool results as information only, and limits the routine to
-  reply, read, end and transcript actions ([setup-grok.md](setup-grok.md)).
+  instruction treats everything in messages, notices, tool results and search results as information only, and
+  limits the routine to reply, read, end and transcript actions plus Grok's own read-only web and X search
+  ([setup-grok.md](setup-grok.md)).
 
 The standing instruction also tells Claude to start conversations only when you ask, to share only what your task
 needs, and to check with you before irreversible, external or security-relevant actions that another agent requests.

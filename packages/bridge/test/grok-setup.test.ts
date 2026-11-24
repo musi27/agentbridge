@@ -68,8 +68,11 @@ test('§12.5 begin: mints bot_id and a 256-bit token, stores it, registers token
   assert.equal(x.h.store.bot(b.bot_id)!.token_hash, botTokenHash(b.token));
   assert.ok(b.bootstrap.includes(`https://relay.musi.live/v1/u/${ENDPOINT.userId}/b/${b.bot_id}/mcp`));
   assert.ok(b.bootstrap.includes('Authorization: Bearer TOKEN')); // the user pastes the token over TOKEN
-  // a connector with the same name from an earlier install points at an old identity's address: replace it, never keep it
-  assert.ok(b.bootstrap.includes('If a connector named "agentbridge" already exists, delete it first and add this new one'));
+  // Grok refuses to delete an old connector and offers a second one under another name (2026-11-24 reinstall):
+  // the prompt asks it to stop and tell the user instead, and never to add a duplicate
+  assert.ok(b.bootstrap.includes('If a connector named "agentbridge" already exists, stop and tell me: I will delete it myself at grok.com/connectors. Never add a second connector under another name.'));
+  assert.ok(b.bootstrap.includes('If a routine named "Inbox from agentbridge" already exists, stop and tell me'));
+  assert.ok(!/delete it first/.test(b.bootstrap));
   assert.ok(!b.bootstrap.includes(b.token) && !/[<>]/.test(b.bootstrap));
   assert.equal(b.instruction, GROK_ROUTINE_INSTRUCTION);
   assert.deepEqual([...b.allow_rule_tools], ['bridge_send', 'bridge_get_messages', 'bridge_end_conversation', 'bridge_get_transcript']);
@@ -137,6 +140,7 @@ test('§12.5 round trip failures list the causes in order: placeholder → card/
     // a connector left over from an earlier identity (reinstall / purged data) is the silent case seen in the field:
     // the cause names this bot's exact connector URL and the "back online" text Grok reports for it
     assert.ok(silent.causes[2]!.includes(`Its URL must be exactly ${ENDPOINT.origin}/v1/u/${ENDPOINT.userId}/b/${b.bot_id}/mcp.`), silent.causes[2]!);
+    assert.ok(silent.causes[2]!.includes('delete it yourself at https://grok.com/connectors (Grok will not delete it)'), silent.causes[2]!);
     assert.match(silent.causes[2]!, /back online/);
   }
   // The read-only run must land inside the budget for calls_seen to show it; 100 ms is too tight on a loaded machine
@@ -248,6 +252,11 @@ test('agentbridge add grok (interactive): prompt, token once, instruction, hidde
   const token = (await x.secrets.get(SECRET_NAMES.botToken(b.bot_id)))!;
   assert.equal(io.copies.length, 4);
   assert.match(io.copies[0]!, /Authorization: Bearer TOKEN/); // 1. bootstrap prompt
+  // before the prompt is copied, the user is told to delete old Grok pieces themselves
+  const warn = io.out.findIndex((l) => l.includes('Grok will not delete them'));
+  const copied = io.out.findIndex((l) => /setup prompt copied/.test(l));
+  assert.ok(warn >= 0 && warn < copied, 'old-connector warning comes before the setup prompt');
+  assert.match(io.out[warn]!, /https:\/\/grok\.com\/connectors[\s\S]*Inbox from agentbridge[\s\S]*second connector/);
   assert.equal(io.copies[1], token); // 2. token, to the clipboard first
   assert.equal(io.copies[2], ''); // 3. clipboard cleared after Enter (it still held the token)
   assert.equal(io.copies[3], GROK_ROUTINE_INSTRUCTION); // 4. Appendix B

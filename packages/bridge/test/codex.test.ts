@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { renderStandingInstruction, STANDING_INSTRUCTION_TEMPLATE, CODEX_WRAPPER_BULLET, IPC_METHODS } from '@agentbridge/protocol';
 import { ipcHarness, cleanup, FakePlugin, hookEvent, inviteFacts } from './ipc-helpers.ts';
 import { IpcClient } from '../src/ipc/client.ts';
-import { addCodex, removeCodex, codexBlock, stripBlock, hasForeignServer, stableNodePath, BEGIN, END } from '../src/init/codex.ts';
+import { addCodex, removeCodex, codexBlock, stripBlock, foreignTables, hasForeignServer, stableNodePath, BEGIN, END, CODEX_HOOK_EVENTS, CODEX_HOOK_NAMES } from '../src/init/codex.ts';
 
 test('codex: registers as codex:<folder>, links the session id, deliveries carry it as thread_id', async () => {
   const h = await ipcHarness();
@@ -125,4 +125,55 @@ test('add/remove codex: one managed block; foreign entries refused; round trip r
   assert.equal(existsSync(join(home2, 'config.toml.agentbridge-backup')), false);
   assert.equal(stripBlock(`a = 1\n\n${codexBlock('/n', '/r')}\n\nb = 2\n`), 'a = 1\n\nb = 2\n');
   assert.equal(stableNodePath('/definitely/missing/node'), '/definitely/missing/node');
+});
+
+test('add codex: every hook is named for /hooks (statusMessage), one name per event', () => {
+  const block = codexBlock('/n', '/r');
+  const names = [...block.matchAll(/^statusMessage = "(.*)"$/gm)].map((m) => m[1]);
+  assert.deepEqual(names, CODEX_HOOK_EVENTS.map((ev) => CODEX_HOOK_NAMES[ev]));
+  assert.equal(new Set(names).size, CODEX_HOOK_EVENTS.length);
+  for (const n of names) assert.match(n!, /^agentbridge: \S/);
+  // each name sits in its own event's handler table
+  for (const ev of CODEX_HOOK_EVENTS) {
+    const section = block.split(`[[hooks.${ev}.hooks]]`)[1]!.split('\n\n')[0]!;
+    assert.ok(section.includes(`statusMessage = "${CODEX_HOOK_NAMES[ev]}"`), ev);
+  }
+});
+
+test('add codex / init refresh: tables Codex appended inside the block (hook trust, folder trust) survive', () => {
+  const home = mkdtempSync(join(tmpdir(), 'ab-codex-')); const env = { CODEX_HOME: home, PATH: '' };
+  const cfg = join(home, 'config.toml'); const opts = { env, nodePath: '/n', runtimeDir: '/r' };
+  // what 0.2.2 wrote (no names), after the user trusted the hooks in /hooks and trusted a folder: Codex appends
+  // new tables at the end of the file, i.e. before our end marker
+  const oldBlock = codexBlock('/n', '/r').replace(/^statusMessage = .*\n/gm, '');
+  const codexAdded = [
+    '[hooks.state]', '',
+    '[hooks.state."/h/config.toml:pre_tool_use:0:0"]', 'trusted_hash = "sha256:aaa"', '',
+    '[hooks.state."/h/config.toml:session_start:0:0"]', 'trusted_hash = "sha256:bbb"', '',
+    '[projects."/w/api"]', 'trust_level = "trusted"',
+  ].join('\n');
+  const head = 'model = "gpt-6-luna"\n';
+  writeFileSync(cfg, `${head}\n${oldBlock.replace(END, `\n${codexAdded}\n${END}`)}\n`);
+  { const f = readFileSync(cfg, 'utf8'); assert.equal(foreignTables(f.slice(f.indexOf(BEGIN) + BEGIN.length, f.indexOf(END))), codexAdded); }
+  // upgrade: the block is rewritten with names; Codex's tables move out of the block, unchanged
+  assert.ok(addCodex(opts).changed);
+  const t = readFileSync(cfg, 'utf8');
+  assert.equal(t, `${head}\n${codexAdded}\n\n${codexBlock('/n', '/r')}\n`);
+  assert.equal(t.split('[hooks.state."/h/config.toml:pre_tool_use:0:0"]').length, 2);
+  // a second run (init's refresh) is a no-op
+  assert.equal(addCodex(opts).changed, false);
+  // Codex adds more trust later (again at the end of the file, inside the block): kept again
+  writeFileSync(cfg, t.replace(END, `\n[hooks.state."/h/config.toml:stop:0:0"]\ntrusted_hash = "sha256:ccc"\n${END}`));
+  assert.ok(addCodex(opts).changed);
+  const t3 = readFileSync(cfg, 'utf8');
+  assert.ok(t3.includes('[hooks.state."/h/config.toml:stop:0:0"]\ntrusted_hash = "sha256:ccc"'));
+  assert.ok(t3.trimEnd().endsWith(`${codexBlock('/n', '/r')}`));
+  assert.equal(addCodex(opts).changed, false);
+  // remove keeps them too: they are the user's choices, and stale trust entries are inert (bound to a hash)
+  assert.ok(removeCodex({ env }).changed);
+  const t4 = readFileSync(cfg, 'utf8');
+  assert.ok(!t4.includes(BEGIN) && !t4.includes('[[hooks.') && !t4.includes('mcp_servers.agentbridge'));
+  assert.ok(t4.includes('[projects."/w/api"]\ntrust_level = "trusted"') && t4.includes('sha256:ccc'));
+  // our own tables are never treated as foreign
+  assert.equal(foreignTables(codexBlock('/n', '/r')), '');
 });

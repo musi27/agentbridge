@@ -10,7 +10,7 @@ const ADDR = { pattern: '^(claude|grok|fake|codex):[A-Za-z0-9_-]{1,64}$' };
 const idem = { idempotency_key: str('Optional key to make retries safe', { maxLength: 128 }) };
 
 export const CLAUDE_TOOLS: readonly ToolDef[] = [
-  { name: 'bridge_list_agents', description: 'List agents you can talk to (address, state, folder).', inputSchema: s({}) },
+  { name: 'bridge_list_agents', description: 'List agents you can talk to (address, state, folder). Your own session is included and marked self: true; that address is you, not a peer.', inputSchema: s({}) },
   { name: 'bridge_start_conversation', description: 'Start a conversation with another agent. Use only when the user asks. Usually returns pending_approval: then call bridge_confirm with exactly the returned fields.',
     inputSchema: s({ peer: str('Address, e.g. grok:researcher', ADDR), topic: str('Short topic (max 120 characters)', { maxLength: 480 }), first_message: str('Your first message'), turn_limit: int('Max turns (default 30, max 200)', { minimum: 1, maximum: 200 }), continues: str('Ended conversation this continues', ULID), ...idem }, ['peer', 'topic', 'first_message']) },
   { name: 'bridge_confirm', description: 'Confirm a pending approval. The user must approve it in Claude Code\'s prompt. Pass exactly the fields you were given.',

@@ -30,6 +30,7 @@ test('Grok bridge_list_agents shows each agent\'s state; a start aimed at a clos
   const list = result<{ data: Array<{ address: string; state: string; folder?: string }> }>(await relayCall(link, bot, 'bridge_list_agents', {}));
   assert.deepEqual(list.data.map((x) => [x.address, x.state]), [['claude:_workdir', 'closed'], ['claude:_workdir-2', 'live']]);
   assert.ok(list.data.every((x) => x.folder === undefined)); // addresses and states only
+  assert.ok(list.data.every((x) => !('self' in x))); // the bot is not listed, so nothing is marked self
   const r = result<{ status: string; hint: string }>(await relayCall(link, bot, 'bridge_start_conversation', { peer: 'claude:_workdir', topic: 't', first_message: 'hi', conversation_id: ulid() }));
   assert.equal(r.status, 'queued');
   assert.match(r.hint, /^claude:_workdir is closed; claude:_workdir-2 is live; /);

@@ -102,7 +102,8 @@ test('uninstall: removes plugin, marketplace, launchd agent, bridge and deny rul
   assert.match(out, /removed {2}Claude Code plugin agentbridge@agentbridge/);
   assert.match(out, new RegExp(`removed {2}${DENY_RULES.length} agentbridge deny rules`));
   assert.match(out, /left {5}Keychain items under service "agentbridge"[\s\S]*fix: agentbridge uninstall --purge-data/);
-  assert.match(out, /In Grok: delete the agentbridge connector and the agentbridge routine/);
+  // Grok refuses to delete its own connector (2026-11-24 reinstall): the user does it at grok.com/connectors
+  assert.match(out, /In Grok: delete the agentbridge connector at https:\/\/grok\.com\/connectors .*"Inbox from agentbridge" routine.*Grok will not delete them/);
   assert.match(w.lines.at(-1)!, /npm uninstall -g @musi27\/agentbridge$/);
 });
 

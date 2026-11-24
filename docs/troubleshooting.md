@@ -179,6 +179,10 @@ agentbridge init
 `init` restarts the bridge on the installed version. Pending approvals expire on the restart; settings, identity and
 conversations are kept. Then restart open Claude Code sessions (or `/reload-plugins`) and Codex sessions.
 
+Upgrading a Grok bot to 0.2.3 from an earlier version: paste the routine instruction again
+([setup-grok.md, step 2](setup-grok.md#step-2-of-4-routine-instruction)). Until you do, Grok says it can't search in the
+routine.
+
 If you run the bridge without the login service (`init --skip-service`), restart it yourself with
 `agentbridge stop` and then `agentbridge start`.
 
@@ -199,7 +203,8 @@ transport.relay_mode always` keeps it connected permanently (see [self-hosting.m
 |---|---|---|
 | A conversation Grok starts takes up to about a minute to reach your approval prompt | Idle-mode checking every 60 seconds | Expected. Nothing to fix. |
 | Grok says a message is **held** (`held_relay`) | The bridge was not connected or didn't answer within 20 seconds | Expected while idle or offline. The bridge picks it up on its next check or connect. |
-| Grok says a reply is waiting "until your computer is back online" every time, while `agentbridge doctor` shows the relay `connected`, and `agentbridge doctor grok:<name>` fails with no calls seen | Grok's `agentbridge` connector still points at an older address: one set up before agentbridge was reinstalled or its data purged. The relay still accepts that old connector, so replies queue at an address no bridge reads | In Grok, edit the `agentbridge` connector so its URL is the one `agentbridge doctor grok:<name>` prints (`…/v1/u/<user id>/b/<bot id>/mcp`), or delete it and add it again. If you no longer have the current token, run `agentbridge revoke grok:<name>` for a new one. Then run `agentbridge doctor grok:<name>` again. |
+| Grok says a reply is waiting "until your computer is back online" every time, while `agentbridge doctor` shows the relay `connected`, and `agentbridge doctor grok:<name>` fails with no calls seen | Grok's `agentbridge` connector still points at an older address: one set up before agentbridge was reinstalled or its data purged. The relay still accepts that old connector, so replies queue at an address no bridge reads | In Grok, edit the `agentbridge` connector so its URL is the one `agentbridge doctor grok:<name>` prints (`…/v1/u/<user id>/b/<bot id>/mcp`), or delete it yourself at [grok.com/connectors](https://grok.com/connectors) (Grok won't delete it) and run `agentbridge add grok` again. If you no longer have the current token, run `agentbridge revoke grok:<name>` for a new one. Then run `agentbridge doctor grok:<name>` again. |
+| During `agentbridge add grok`, Grok says removing the old `agentbridge` connector is refused, or offers to add a second connector under another name | Grok won't delete connectors itself | Don't accept a second connector: tool names clash and the old one's token no longer works, so replies get lost. Delete the old connector yourself at [grok.com/connectors](https://grok.com/connectors) (signed in: open it, then remove it), and any old "Inbox from agentbridge" routine in the Grok Bot app. Then send the setup prompt again. |
 | Grok's read tools fail with `bridge_offline` | The bridge isn't connected | Reads only happen during active conversations, when the bridge is connected. If this persists, check the bridge is running and online. |
 | Notification "relay disconnected" (after 5 minutes) | Your Mac is offline, the relay is down, or the relay's hosting is paused | Check your network and `agentbridge status`. On a self-hosted relay on Vercel Hobby, check for `503 DEPLOYMENT_PAUSED` ([self-hosting.md](self-hosting.md#vercel-hobby-can-pause-your-whole-team)). |
 | Notification that the daily connected-time cap was reached | The bridge was connected for 6 hours today (`transport.max_connected_hours_per_day`) | It stays in 60-second checking mode until the next day. Conversations keep working, with up to 60 seconds' delay for Grok's messages. End stuck conversations with `agentbridge end --inactive <duration>`. |
@@ -288,7 +293,9 @@ yourself:
    security delete-generic-password -s agentbridge
    ```
 
-6. In Grok, delete the agentbridge connector and the agentbridge routine for each bot.
+6. In Grok, for each bot, delete the `agentbridge` connector at [grok.com/connectors](https://grok.com/connectors)
+   (signed in: open the connector, then remove it) and the "Inbox from agentbridge" routine. Grok won't delete them
+   itself.
 7. Last:
 
    ```bash
@@ -303,8 +310,10 @@ yourself:
 **Cause.** Codex hasn't run the agentbridge hooks. Codex runs only hooks you've trusted, and without them the bridge
 never learns the Codex session id that `codex queue` needs.
 
-**Fix.** In Codex, run `/hooks` and trust the agentbridge hooks, then start a new session. If you changed agentbridge's
-install location, run `agentbridge add codex` again (the hook command changes, and Codex asks you to trust it again).
+**Fix.** In Codex, run `/hooks` and trust the 5 "agentbridge: …" hooks (see
+[Connect Codex CLI sessions](setup-codex.md#set-up), step 3), then start a new session. Hooks marked **modified** need
+trusting again too: that happens after an upgrade that changes them, or if you changed agentbridge's install location
+and ran `agentbridge add codex` again.
 
 ## Codex: "Codex auto-review is on" when confirming
 

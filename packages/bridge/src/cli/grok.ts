@@ -2,6 +2,7 @@
 // Secrets, the relay and the database are handled by the bridge (cli.add_grok / cli.revoke steps); this module only
 // talks to the user: clipboard (pbcopy), prompts and hidden input. IO is injectable for tests.
 import { spawn } from 'node:child_process';
+import { GROK_CONNECTORS_URL } from '@agentbridge/protocol';
 import type { BeginResult, RoundTripResult } from '../grok/setup.ts';
 
 export interface Io {
@@ -15,6 +16,14 @@ export interface Io {
   paste(): Promise<string | null>;
 }
 export type Call = (method: string, params: unknown, timeoutMs?: number) => Promise<unknown>;
+
+/** Shown before the setup prompt: Grok refuses to delete these itself, and a second connector loses replies. */
+export const OLD_GROK_SETUP_WARNING = [
+  'Before you paste the prompt: if you set up a Grok bot before (or reinstalled agentbridge), delete the old pieces yourself first. Grok will not delete them:',
+  `  - any connector named "agentbridge": open ${GROK_CONNECTORS_URL} (signed in), open the connector and remove it`,
+  '  - any routine named "Inbox from agentbridge" in the Grok Bot app',
+  'Do not let the bot add a second connector under another name: the old one has a revoked token, so replies get lost.',
+].join('\n');
 
 const yes = (s: string, dflt = false): boolean => { const t = s.trim().toLowerCase(); return t === '' ? dflt : t === 'y' || t === 'yes'; };
 /** Round trip takes up to 90 s on the bridge (including the POST); leave room for IPC. */
@@ -83,6 +92,7 @@ export async function addGrokFlow(call: Call, io: Io): Promise<number> {
   let webhookSaved = false;
   try {
     io.print('\nStep 1 of 4: connector, routine and Allow rule');
+    io.print(OLD_GROK_SETUP_WARNING);
     await copyOrShow(io, b.bootstrap, 'setup prompt');
     io.print('Paste it into a chat with your Grok bot, but do not send it yet.');
     // the token replaces the prompt on the clipboard, so only copy it once the prompt is pasted (e2e run 1)

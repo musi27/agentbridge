@@ -6,7 +6,7 @@
 // bridge → deny rules → (--purge-data) Keychain items, then the data folder → Grok-side and npm steps for the user.
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { basename, resolve, sep } from 'node:path';
-import { SECRET_NAMES, type PresenceChecker, type SecretStore } from '@agentbridge/protocol';
+import { GROK_CONNECTORS_URL, SECRET_NAMES, type PresenceChecker, type SecretStore } from '@agentbridge/protocol';
 import { removeDenyRules } from '@agentbridge/adapter-claude-code';
 import { MARKETPLACE_NAME, PLUGIN_ID, type ClaudeRunner } from './init.ts';
 import type { Paths } from '../paths.ts';
@@ -70,7 +70,7 @@ export async function runUninstall(deps: UninstallDeps, o: UninstallOptions = {}
     deps.print(`${LABEL[s.status]}  ${s.detail}${s.fix ? `\n         fix: ${s.fix}` : ''}`);
   };
   const manual = [
-    'In Grok: delete the agentbridge connector and the agentbridge routine for each bot you added (agentbridge cannot reach them). If you reinstall later, a leftover connector keeps sending Grok\'s replies to an address no bridge reads.',
+    `In Grok: delete the agentbridge connector at ${GROK_CONNECTORS_URL} (signed in: open the connector, then Remove) and the "Inbox from agentbridge" routine for each bot you added. Do it yourself: agentbridge cannot reach them and Grok will not delete them. If you reinstall later, a leftover connector keeps sending Grok's replies to an address no bridge reads.`,
     `Last: npm uninstall -g ${NPM_PACKAGE}`,
   ];
 

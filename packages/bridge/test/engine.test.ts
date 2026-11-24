@@ -434,8 +434,28 @@ test('§11.4: list_conversations returns own conversations only; transcripts for
   assert.deepEqual((t.data as { messages: Array<{ body: string }> }).messages.map((m) => m.body), ['hello', 'secret plan']);
   const page = await h.tool(a, 'bridge_get_transcript', { conversation_id: cid, before_seq: 2, limit: 1 });
   assert.deepEqual((page.data as { messages: Array<{ body: string }> }).messages.map((m) => m.body), ['hello']);
-  const agents = (await h.tool(e, 'bridge_list_agents', {})).data as Array<{ address: string }>;
-  assert.deepEqual(agents.map((x) => x.address).sort(), ['fake:alice', 'fake:bob']);
+  const agents = (await h.tool(e, 'bridge_list_agents', {})).data as Array<{ address: string; self?: boolean }>;
+  assert.deepEqual(agents.map((x) => x.address), ['fake:eve', 'fake:alice', 'fake:bob']); // own entry first
+  assert.deepEqual(agents.map((x) => x.self), [true, undefined, undefined]);
+  h.engine.stop();
+});
+
+test('bridge_list_agents: two sessions in one folder each see which address is their own (self: true)', async () => {
+  const h = await harness();
+  const one = h.engine.registerLocal({ agent: 'claude', name: 'agentbridge', cwd: '/w/agentbridge' });
+  const two = h.engine.registerLocal({ agent: 'claude', name: 'agentbridge', cwd: '/w/agentbridge' });
+  const other = h.engine.registerLocal({ agent: 'fake', name: 'agentbridge', cwd: '/w/agentbridge' }); // any other local agent (Codex goes the same way)
+  assert.equal(two.address, 'claude:agentbridge-2');
+  for (const me of [one, two, other]) {
+    const rows = (await h.tool(me, 'bridge_list_agents', {})).data as Array<{ address: string; self?: boolean; folder?: string }>;
+    assert.equal(rows.length, 3);
+    assert.deepEqual(rows.filter((x) => x.self === true).map((x) => x.address), [me.address]);
+    assert.equal(rows[0]!.address, me.address); // own entry first
+    assert.ok(rows.every((x) => x.folder === 'agentbridge'));
+  }
+  // a gone session is still left out, its own entry included
+  h.store.updateParticipant(two.participant_id, { state: 'gone' });
+  assert.deepEqual(((await h.tool(one, 'bridge_list_agents', {})).data as Array<{ address: string }>).map((x) => x.address), [one.address, other.address]);
   h.engine.stop();
 });
 

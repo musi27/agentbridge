@@ -28877,7 +28877,7 @@ var ULID = { pattern: "^[0-9A-HJKMNP-TV-Z]{26}$" };
 var ADDR = { pattern: "^(claude|grok|fake|codex):[A-Za-z0-9_-]{1,64}$" };
 var idem = { idempotency_key: str("Optional key to make retries safe", { maxLength: 128 }) };
 var CLAUDE_TOOLS = [
-  { name: "bridge_list_agents", description: "List agents you can talk to (address, state, folder).", inputSchema: s({}) },
+  { name: "bridge_list_agents", description: "List agents you can talk to (address, state, folder). Your own session is included and marked self: true; that address is you, not a peer.", inputSchema: s({}) },
   {
     name: "bridge_start_conversation",
     description: "Start a conversation with another agent. Use only when the user asks. Usually returns pending_approval: then call bridge_confirm with exactly the returned fields.",
@@ -31308,7 +31308,7 @@ function renderToolResult(r, nonce2) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.2.2";
+var PLUGIN_VERSION = "0.2.3";
 var PLUGIN_NAME = "agentbridge";
 var MCP_SERVER_NAME = "agentbridge";
 var TOOL_NAME_PREFIX = `mcp__plugin_${PLUGIN_NAME}_${MCP_SERVER_NAME}__`;
