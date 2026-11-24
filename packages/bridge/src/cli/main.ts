@@ -9,6 +9,7 @@ import { SETUP_MARKER_FILE, pidAlive, setupMarkerLive } from '@agentbridge/proto
 import { fileURLToPath } from 'node:url';
 import { IpcClient, IpcCallError } from '../ipc/client.ts';
 import { resolvePaths } from '../paths.ts';
+import { BRIDGE_VERSION, versionMismatch } from '../version.ts';
 import { addGrokFlow, printRoundTrip, revokeGrokFlow, terminalIo, type Io } from './grok.ts';
 import type { RoundTripResult } from '../grok/setup.ts';
 import type { RelayRuntime as RelayRuntimeT } from '../relay/runtime.ts';
@@ -59,7 +60,8 @@ Privileged (Touch ID / password, checked by the bridge):
   config set <key> <value> | config verify [show|reapprove|restore] | remove <address> | purge [--before <duration>] | stop
   add grok | revoke grok:<name> | identity rotate (M2)
   uninstall [--purge-data]   remove the plugin, login agent and deny rules (works without a running bridge)
-Global options (after the subcommand for privileged commands): --json, --home <dir>`;
+Global options (after the subcommand for privileged commands): --json, --home <dir>
+Version: agentbridge --version   (upgrade: npm install -g @musi27/agentbridge, then agentbridge init)`;
 
 type Print = (s: string) => void;
 
@@ -76,6 +78,8 @@ function human(cmd: string, r: unknown, print: Print): void {
   if (cmd === 'status') {
     const s = r as { bridge_version: string; pid: number; policy: { ok: boolean; mode?: string; version?: number; reason?: string }; participants: Array<{ address: string; title?: string; state: string; permission_mode: string; short_id: string; folder?: string }>; conversations: Record<string, number>; queued_deliveries: number; pending_approvals: Array<{ approval_id: string; kind: string; participant: string; peer: string; expires_in_s: number | null }>; auto_mode_sessions: string[]; notifications: Array<{ at: string; title: string; body: string }> };
     print(`bridge ${s.bridge_version} (pid ${s.pid}) — policy ${s.policy.ok ? `v${s.policy.version}, mode ${s.policy.mode}` : `TAMPERED (${s.policy.reason}): run agentbridge config verify`}`);
+    const vm = versionMismatch(s.bridge_version);
+    if (vm) print(`warning: ${vm}; ${VERSION_FIX}`);
     print(`conversations: ${s.conversations['active']} active, ${s.conversations['pending']} pending, ${s.conversations['ended']} ended; ${s.queued_deliveries} queued deliveries`);
     for (const p of s.participants) print(`  ${agentLine(p)}`);
     if (s.participants.some((p) => p.permission_mode === 'unknown')) print(UNKNOWN_MODE_NOTE);
@@ -142,9 +146,36 @@ async function codexSetup(cmd: 'add' | 'remove', print: Print): Promise<number> 
 }
 
 async function call(socket: string, method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
+  return (await callWithVersion(socket, method, params, timeoutMs)).result;
+}
+
+/** Like call(), plus the running bridge's version from the hello answer. */
+async function callWithVersion(socket: string, method: string, params: unknown, timeoutMs?: number): Promise<{ result: unknown; bridgeVersion: string | null }> {
   let c: IpcClient;
   try { c = await IpcClient.open(socket, 'cli'); } catch { throw new Error('agentbridge is not running (start it with: agentbridge start)'); }
-  try { return await c.request(method, params, timeoutMs); } finally { c.close(); }
+  try { return { result: await c.request(method, params, timeoutMs), bridgeVersion: c.bridgeVersion }; } finally { c.close(); }
+}
+
+/** What to do about a CLI/bridge version mismatch (§14.1 upgrade). */
+export const VERSION_FIX = 'run agentbridge init to restart the bridge on this version';
+
+/** doctor's version check: the CLI and the running bridge should be the same release. */
+export function versionCheck(bridgeVersion: string | null): { id: string; ok: boolean; detail: string; fix?: string } {
+  const m = versionMismatch(bridgeVersion);
+  return m ? { id: 'bridge_version', ok: false, detail: `${m} (restart it after an upgrade)`, fix: VERSION_FIX }
+    : { id: 'bridge_version', ok: true, detail: `bridge ${bridgeVersion ?? '?'} matches this agentbridge ${BRIDGE_VERSION}` };
+}
+
+/** `agentbridge --version`: this CLI's version, plus the running bridge's when it differs. */
+async function version(home: string | undefined, print: Print): Promise<number> {
+  print(`agentbridge ${BRIDGE_VERSION}`);
+  const socket = resolvePaths(home).socket;
+  if (!(await ping(socket))) return 0;
+  try {
+    const c = await IpcClient.open(socket, 'cli');
+    try { const m = versionMismatch(c.bridgeVersion); if (m) print(`note: ${m}; ${VERSION_FIX}`); } finally { c.close(); }
+  } catch { /* the version line is what was asked for */ }
+  return 0;
 }
 
 function flagValue(args: string[], name: string): string | undefined {
@@ -317,6 +348,9 @@ async function uninstall(home: string | undefined, args: readonly string[], json
 
 export async function main(argv: readonly string[], print: Print = (s) => process.stdout.write(`${s}\n`), printErr: Print = (s) => process.stderr.write(`${s}\n`), io?: Io): Promise<number> {
   let p: Parsed;
+  if (argv[0] === '--version' || argv[0] === '-v' || argv[0] === 'version') {
+    const h = argv.indexOf('--home'); return await version(h > 0 ? argv[h + 1] : undefined, print);
+  }
   try { p = parseArgs(argv); } catch (e) { printErr(`agentbridge: ${(e as Error).message}`); return 2; }
   try {
     if (p.cmd === 'help' || p.cmd === '--help') { print(HELP); return 0; }
@@ -336,7 +370,12 @@ export async function main(argv: readonly string[], print: Print = (s) => proces
       if (p.json) print(JSON.stringify({ checks }, null, 2)); else human('doctor', { checks }, print);
       return checks.every((c) => c.ok) ? 0 : 1;
     }
-    const r = await call(socket, req.method, req.params, req.method === 'cli.doctor' && (req.params as { round_trip?: string }).round_trip ? 150_000 : undefined);
+    const { result, bridgeVersion } = await callWithVersion(socket, req.method, req.params, req.method === 'cli.doctor' && (req.params as { round_trip?: string }).round_trip ? 150_000 : undefined);
+    let r = result;
+    if (req.method === 'cli.doctor' && r && typeof r === 'object' && Array.isArray((r as { checks?: unknown }).checks)) {
+      r = { ...r, checks: [versionCheck(bridgeVersion), ...(r as { checks: unknown[] }).checks] };
+    }
+    if (req.method === 'cli.status' && r && typeof r === 'object') r = { ...r, cli_version: BRIDGE_VERSION };
     if (p.json) print(JSON.stringify(r, null, 2)); else human(p.cmd, r, print);
     return 0;
   } catch (e) {

@@ -12,8 +12,8 @@ const repoRoot = resolve(pkgDir, '..', '..');
 const plugin = join(pkgDir, 'plugin');
 const json = (p: string) => JSON.parse(readFileSync(p, 'utf8'));
 
-test('versions agree: package.json, plugin.json, PLUGIN_VERSION', () => {
-  assert.equal(json(join(pkgDir, 'package.json')).version, PLUGIN_VERSION);
+test('versions agree: release package.json, plugin.json, PLUGIN_VERSION (the workspace package.json version is internal)', () => {
+  assert.equal(json(join(repoRoot, 'packaging', 'npm', 'package.json')).version, PLUGIN_VERSION, 'the plugin version is the release version');
   assert.equal(json(join(plugin, '.claude-plugin', 'plugin.json')).version, PLUGIN_VERSION);
 });
 

@@ -1,6 +1,7 @@
 // Minimal IPC client (CLI, tests, and a reference for the plugin): NDJSON request/response plus events.
 import { connect, type Socket } from 'node:net';
 import { IPC_PROTOCOL, zIpcFrame, type IpcError } from '@agentbridge/protocol';
+import { BRIDGE_VERSION } from '../version.ts';
 
 export class IpcCallError extends Error {
   readonly code: IpcError['code'];
@@ -14,6 +15,8 @@ export class IpcClient {
   private readonly waiting = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private readonly handlers = new Map<string, (params: unknown) => void>();
   closed = false;
+  /** The bridge's version from the hello answer (set by open()). */
+  bridgeVersion: string | null = null;
 
   private constructor(socket: Socket) {
     this.socket = socket;
@@ -33,9 +36,10 @@ export class IpcClient {
   }
 
   /** Connect and send hello. */
-  static async open(socketPath: string, client: 'plugin' | 'hook' | 'cli', clientVersion = '0.1.0'): Promise<IpcClient> {
+  static async open(socketPath: string, client: 'plugin' | 'hook' | 'cli', clientVersion = BRIDGE_VERSION): Promise<IpcClient> {
     const c = await IpcClient.connect(socketPath);
-    await c.request('hello', { protocol: IPC_PROTOCOL, client, client_version: clientVersion });
+    const hello = await c.request<{ bridge_version?: unknown }>('hello', { protocol: IPC_PROTOCOL, client, client_version: clientVersion });
+    if (typeof hello?.bridge_version === 'string') c.bridgeVersion = hello.bridge_version;
     return c;
   }
 

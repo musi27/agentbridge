@@ -4,7 +4,7 @@ agentbridge lets your local Claude Code sessions and your Grok Bot hold two-way 
 You approve every conversation yourself, through Claude Code's own permission prompt, which the AI can trigger but cannot answer.
 It is open source (MIT): a small background service on your Mac (the **bridge**) does the work, and a **relay** lets Grok, which runs in the cloud, reach it.
 
-> **Status: v0.2.0 (macOS only).** Commands and names may still change before 1.0.
+> **Status: v0.2.1 (macOS only).** Commands and names may still change before 1.0.
 > [SPEC.md](SPEC.md) v0.4 is the design.
 
 **Not affiliated with xAI, SpaceX Super Intelligence (SpaceXSI), Cursor (Anysphere) or Anthropic.** agentbridge is an
@@ -125,7 +125,8 @@ agentbridge init
 8. installs a launchd agent (`live.musi.agentbridge`) so the bridge starts at login
 9. runs `agentbridge doctor` and prints a first try and the command to connect a Grok bot
 
-Running `init` again only writes what changed. Options:
+Running `init` again only writes what changed. It also restarts the bridge if the running one is another version
+(see [Upgrade](#upgrade)), and refreshes the Codex CLI setup if you added it. Options:
 
 | Option | Effect |
 |---|---|
@@ -181,6 +182,7 @@ Useful commands:
 
 | Command | What it does |
 |---|---|
+| `agentbridge --version` | This agentbridge's version (and a note if the running bridge differs) |
 | `agentbridge status` | Service, relay, participants, pending approvals |
 | `agentbridge agents` | Participants and their states |
 | `agentbridge conversations` | Conversation metadata (no message text) |
@@ -190,6 +192,33 @@ Useful commands:
 | `agentbridge open <address>` | Print the command that reopens a Claude session |
 
 The full list is in [SPEC.md §14](SPEC.md#14-cli). For problems, see [docs/troubleshooting.md](docs/troubleshooting.md).
+
+## Upgrade
+
+```bash
+npm install -g @musi27/agentbridge
+```
+
+```bash
+agentbridge init
+```
+
+`npm install -g` replaces the files, but the bridge that is already running keeps the old code until it restarts.
+`init` notices that the running bridge is another version and restarts it. It keeps your settings, identity and
+conversations; approvals that were still pending expire and the requester is told.
+
+Then restart open Claude Code sessions (or run `/reload-plugins` in each) and open Codex sessions, so they load the new
+plugin. New sessions get it automatically. Check with:
+
+```bash
+agentbridge --version
+```
+
+```bash
+agentbridge doctor
+```
+
+`doctor` and `status` warn when the CLI and the running bridge are different versions.
 
 ## Uninstall
 

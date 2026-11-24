@@ -25,7 +25,7 @@ import {
   transition, uniqueName, COOLDOWN_END_REASONS,
 } from './rules.ts';
 
-export const BRIDGE_VERSION = '0.2.0';
+export { BRIDGE_VERSION } from '../version.ts';
 const LOCAL_AGENTS: ReadonlySet<AgentType> = new Set(['claude', 'codex', 'fake']);
 /** Local sessions linked by an MCP server child process; they need a live link to receive (§10, §11a). */
 const isHost = (a: AgentType): boolean => a === 'claude' || a === 'codex';

@@ -1018,6 +1018,8 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
 6. Install the login service (a launchd agent).
 7. Run `doctor`. Print a first try.
 
+**Upgrade:** `npm install -g @musi27/agentbridge`, then `init` again. One release version covers the CLI, the bridge and the plugin (`agentbridge --version`). `init` restarts a running bridge whose version (from the IPC `hello`) differs from the CLI's, and refreshes the Codex block if `add codex` wrote one; `doctor` and `status` report a mismatch. Claude Code loads the plugin in place from the npm folder, so new sessions get the new plugin; open sessions need a restart or `/reload-plugins`.
+
 **Target:** < 10 minutes, excluding Grok setup. Grok setup measured ≈ 4 minutes in M0 (V14).
 
 **`uninstall`** undoes `init`. It needs user presence, which the CLI checks itself (the bridge may be down), and it never needs the bridge. Re-running it is safe: steps already done report "absent". It prints what it removed and what it left.

@@ -292,7 +292,7 @@ function startBridgeDetached(cli, env = process.env) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.4.0";
+var PLUGIN_VERSION = "0.2.1";
 var PLUGIN_NAME = "agentbridge";
 var MCP_SERVER_NAME = "agentbridge";
 var TOOL_NAME_PREFIX = `mcp__plugin_${PLUGIN_NAME}_${MCP_SERVER_NAME}__`;

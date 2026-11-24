@@ -1,6 +1,6 @@
 // Verifies a packed agentbridge tarball the way a user gets it: `npm install -g` into a temp prefix (no registry
 // access needed: the package has no dependencies), then `agentbridge help`, `agentbridge doctor` without a bridge, the
-// helper, the plugin + marketplace layout, and that no `@agentbridge/*` import survived bundling.
+// helper, `--version`, the plugin + marketplace layout and version, and that no `@agentbridge/*` import survived bundling.
 // Usage: node packaging/npm/scripts/verify.ts <musi27-agentbridge-x.y.z.tgz>   (exit 1 on any failure)
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
@@ -32,6 +32,9 @@ export function verifyTarball(tgz: string): VerifyResult {
 
     const help = spawnSync(bin, ['help'], { encoding: 'utf8', env });
     add('help', help.status === 0 && /agentbridge/.test(help.stdout), `agentbridge help exit ${help.status}`);
+
+    const ver = spawnSync(bin, ['--version', '--home', join(home, 'ab')], { encoding: 'utf8', env });
+    add('version', ver.status === 0 && ver.stdout.trim() === `agentbridge ${String(manifest['version'])}`, `agentbridge --version printed "${ver.stdout.trim()}" (package.json ${String(manifest['version'])})`);
 
     const doc = spawnSync(bin, ['doctor', '--json'], { encoding: 'utf8', env, timeout: 60_000 });
     let parsed: { checks?: Array<{ id: string; ok: boolean; detail: string }> } = {};
@@ -70,6 +73,8 @@ export function verifyTarball(tgz: string): VerifyResult {
 
     const market = JSON.parse(readFileSync(join(pkg, '.claude-plugin', 'marketplace.json'), 'utf8')) as { plugins: Array<{ source: string }> };
     const pluginDir = join(pkg, market.plugins[0]!.source);
+    const pluginVersion = (JSON.parse(readFileSync(join(pluginDir, '.claude-plugin', 'plugin.json'), 'utf8')) as { version?: string }).version;
+    add('plugin_version', pluginVersion === manifest['version'], `plugin.json ${pluginVersion}, package.json ${String(manifest['version'])} (Claude Code shows the plugin version)`);
     add('plugin_layout', existsSync(join(pluginDir, '.claude-plugin', 'plugin.json')) && existsSync(join(pluginDir, 'runtime', 'server.mjs')) && existsSync(join(pluginDir, 'hooks', 'hooks.json')), `marketplace → ${market.plugins[0]!.source}`);
     add('service_entry', existsSync(join(pkg, 'dist', 'service-main.mjs')), 'dist/service-main.mjs (launchd entry)');
 

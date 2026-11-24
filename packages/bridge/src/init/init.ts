@@ -54,6 +54,12 @@ export interface InitDeps {
   service: ServiceControl;
   /** Is a bridge answering on the socket? */
   bridgeRunning(): Promise<boolean>;
+  /** The running bridge's version (IPC hello), or null when none answers. Optional: tests without one skip the check. */
+  bridgeVersion?(): Promise<string | null>;
+  /** This agentbridge's version: a running bridge on another version is restarted (upgrade, §14.1). */
+  version?: string;
+  /** Re-write the Codex block when `add codex` set it up before (null: not set up). Optional. */
+  refreshCodex?(): { ok: boolean; changed: boolean; message: string } | null;
   /** Ask a manually started bridge to stop (IPC cli.stop; it runs its own presence check). */
   stopBridge(): Promise<void>;
   /** Start a bridge without the login service (restores a manually started bridge init stopped). */
@@ -191,8 +197,12 @@ export async function runInit(deps: InitDeps, o: InitOptions = {}): Promise<Init
     const job0 = svcOpts ? await deps.service.job() : null;
     const holder0 = deps.lockPid();
     const manualHolds = !!svcOpts && holder0 !== null && holder0 !== (job0?.pid ?? null);
-    const needService = !!svcOpts && (serviceStatus !== 'running' || manualHolds || !(await deps.service.plistMatches(svcOpts)));
     const running = await deps.bridgeRunning();
+    // after `npm install -g` the plist is unchanged but the bridge still runs the old code: restart it on this version
+    const runningVersion = running && deps.version && deps.bridgeVersion ? await deps.bridgeVersion().catch(() => null) : null;
+    const stale = !!runningVersion && runningVersion !== deps.version;
+    if (stale) deps.print(`the running bridge is ${runningVersion}; this agentbridge is ${deps.version}: init will restart it`);
+    const needService = !!svcOpts && (stale || serviceStatus !== 'running' || manualHolds || !(await deps.service.plistMatches(svcOpts)));
 
     // 7. while init changes things, on-demand starts (plugin SessionStart hook, `agentbridge start`) must not race it
     if (writes.length || needService) { deps.marker.write(); markerWritten = true; }
@@ -286,7 +296,8 @@ export async function runInit(deps: InitDeps, o: InitOptions = {}): Promise<Init
     }
 
     // 9. login service (launchd agent): rewritten and (re)started only when its plist or state needs it
-    if (o.skipService) step({ id: 'service', ok: true, skipped: true, detail: 'launchd agent skipped (--skip-service); start the bridge with agentbridge start' }, deps, steps);
+    if (o.skipService && stale && !stopped) step({ id: 'service', ok: false, detail: `launchd agent skipped (--skip-service), so the bridge still runs ${runningVersion}`, fix: 'agentbridge stop, then agentbridge start' }, deps, steps);
+    else if (o.skipService) step({ id: 'service', ok: true, skipped: true, detail: 'launchd agent skipped (--skip-service); start the bridge with agentbridge start' }, deps, steps);
     else if (!svcOpts || !lp) step({ id: 'service', ok: false, detail: 'the built service entry is missing', fix: 'npm run build, then agentbridge init again' }, deps, steps);
     else if (!needService && !stopped) step({ id: 'service', ok: true, detail: `launchd agent up to date and running (node ${lp.nodePath})` }, deps, steps);
     else {
@@ -297,7 +308,7 @@ export async function runInit(deps: InitDeps, o: InitOptions = {}): Promise<Init
         const h = await handover();
         const up = h.ok && await deps.waitForBridge();
         const notes = [`node ${lp.nodePath}`, lp.claudePath ? `claude ${lp.claudePath}` : 'claude not found (doctor will report it)'];
-        step({ id: 'service', ok: up, detail: up ? `launchd agent installed; launchd runs the bridge (pid ${h.pid}; ${notes.join(', ')})${h.handedOver ? ' — took over from a manually started bridge' : ''}` : `launchd agent installed but ${h.ok ? 'the bridge did not answer' : h.detail}`, ...(up ? {} : { fix: `see ${deps.service_entry.logDir}/bridge.err.log, then agentbridge init again` }) }, deps, steps);
+        step({ id: 'service', ok: up, detail: up ? `launchd agent installed; launchd runs the bridge (pid ${h.pid}; ${notes.join(', ')})${h.handedOver ? ' — took over from a manually started bridge' : ''}${stale ? ` — restarted on ${deps.version} (was ${runningVersion})` : ''}` : `launchd agent installed but ${h.ok ? 'the bridge did not answer' : h.detail}`, ...(up ? {} : { fix: `see ${deps.service_entry.logDir}/bridge.err.log, then agentbridge init again` }) }, deps, steps);
       } catch (e) {
         step({ id: 'service', ok: false, detail: `launchd agent: ${(e as Error).message}`, fix: 'agentbridge start (runs the bridge without the login service)' }, deps, steps);
       }
@@ -310,6 +321,16 @@ export async function runInit(deps: InitDeps, o: InitOptions = {}): Promise<Init
   } finally {
     if (markerWritten) { try { deps.marker.remove(); } catch { /* best effort */ } }
     try { policy.close?.(); } catch { /* closing */ }
+  }
+
+  // 10. Codex CLI: refresh the managed block when `add codex` set it up (paths or hooks may change between releases)
+  if (deps.refreshCodex) {
+    try {
+      const c = deps.refreshCodex();
+      if (c) step({ id: 'codex', ok: c.ok, detail: c.changed ? `${c.message}; restart open Codex sessions to load it` : c.message, ...(c.ok ? {} : { fix: 'agentbridge add codex' }) }, deps, steps);
+    } catch (e) {
+      step({ id: 'codex', ok: false, detail: `could not refresh the Codex setup: ${(e as Error).message}`, fix: 'agentbridge add codex' }, deps, steps);
+    }
   }
 
   // 11. doctor (needs the running bridge)

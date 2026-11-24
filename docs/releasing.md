@@ -23,14 +23,20 @@ npm run pack:release
 ```
 
 `pack:release` builds the helper if missing, builds the package, runs `npm pack` into `packaging/npm/out/`, and
-verifies the tarball (`packaging/npm/scripts/verify.ts`): it installs it into a temp prefix, runs `agentbridge help`
-and `agentbridge doctor` without a bridge, checks the helper answers and is universal and ad-hoc signed, checks the
-plugin layout and the launchd entry, and that no `@agentbridge/*` import is left. It prints the tarball size and a
+verifies the tarball (`packaging/npm/scripts/verify.ts`): it installs it into a temp prefix, runs `agentbridge help`,
+`agentbridge --version` (must print the package version) and `agentbridge doctor` without a bridge, checks the helper answers and is universal and ad-hoc signed, checks the
+plugin layout and version and the launchd entry, and that no `@agentbridge/*` import is left. It prints the tarball size and a
 contents summary.
 
 ## Cut a release
 
-1. Bump `version` in `packaging/npm/package.json` (and `BRIDGE_VERSION` in `packages/bridge/src/core/engine.ts`).
+1. Bump the version everywhere it lives; one release version covers the CLI, the bridge and the plugin, and
+   `npm run check` fails if they disagree:
+   - `version` in `packaging/npm/package.json`
+   - `BRIDGE_VERSION` in `packages/bridge/src/version.ts`
+   - `PLUGIN_VERSION` in `adapters/claude-code/src/version.ts` and `version` in
+     `adapters/claude-code/plugin/.claude-plugin/plugin.json`, then `npm run build:plugin -w @agentbridge/adapter-claude-code`
+   - the README status line (`Status: vX.Y.Z`)
 2. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`. The [release workflow](../.github/workflows/release.yml)
    runs `npm ci`, `npm run check`, builds the helper fresh (universal, ad-hoc), builds and verifies the package, and
    creates a **draft** GitHub release with `musi27-agentbridge-0.1.0.tgz` attached. (Manual runs from the Actions tab build

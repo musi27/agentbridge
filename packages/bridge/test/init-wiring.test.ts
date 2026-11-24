@@ -459,6 +459,58 @@ test('race: re-running with nothing to change neither stops the bridge nor write
   } finally { w.cleanup(); }
 });
 
+test('upgrade: a running bridge on another version is restarted by init (plist unchanged, nothing to write)', async () => {
+  const w = world({ running: 'managed' });
+  try {
+    await runInit(w.deps, { yes: true });
+    let bridgeVersion = '0.2.0';
+    w.deps.version = '0.2.1';
+    w.deps.bridgeVersion = async () => bridgeVersion;
+    w.deps.service.install = (orig => async (opts) => { await orig(opts); bridgeVersion = '0.2.1'; })(w.deps.service.install);
+    w.events.length = 0; w.stopped.length = 0; w.lines.length = 0;
+    const installs = w.installs;
+    const r = await runInit(w.deps, { yes: true });
+    assert.ok(r.ok, w.lines.join('\n'));
+    assert.equal(w.installs, installs + 1, 'the launchd agent is reinstalled, which restarts the bridge');
+    assert.deepEqual(w.stopped, [], 'no policy writes, so no separate stop');
+    assert.deepEqual(w.events, ['marker+', 'marker-']);
+    assert.match(w.lines.join('\n'), /the running bridge is 0\.2\.0; this agentbridge is 0\.2\.1/);
+    assert.match(r.steps.find((s) => s.id === 'service')!.detail, /restarted on 0\.2\.1 \(was 0\.2\.0\)/);
+    // same version again: nothing restarts
+    const again = await runInit(w.deps, { yes: true });
+    assert.ok(again.ok); assert.equal(w.installs, installs + 1);
+    assert.match(again.steps.find((s) => s.id === 'service')!.detail, /up to date and running/);
+  } finally { w.cleanup(); }
+});
+
+test('upgrade: with --skip-service a bridge on another version is reported with the fix, not restarted', async () => {
+  const w = world({ running: 'manual' });
+  try {
+    await runInit(w.deps, { yes: true, skipService: true });
+    w.deps.version = '0.2.1'; w.deps.bridgeVersion = async () => '0.2.0';
+    const r = await runInit(w.deps, { yes: true, skipService: true });
+    const svc = r.steps.find((s) => s.id === 'service')!;
+    assert.equal(svc.ok, false); assert.match(svc.detail, /still runs 0\.2\.0/); assert.match(svc.fix ?? '', /agentbridge stop, then agentbridge start/);
+  } finally { w.cleanup(); }
+});
+
+test('init refreshes the Codex block only when `add codex` set it up', async () => {
+  const w = world({ running: 'managed' });
+  try {
+    let r = await runInit(w.deps, { yes: true });
+    assert.equal(r.steps.find((s) => s.id === 'codex'), undefined, 'no refreshCodex dep: no step');
+    w.deps.refreshCodex = () => null;
+    r = await runInit(w.deps, { yes: true });
+    assert.equal(r.steps.find((s) => s.id === 'codex'), undefined, 'not set up: no step');
+    w.deps.refreshCodex = () => ({ ok: true, changed: true, message: 'added agentbridge to /x/config.toml' });
+    r = await runInit(w.deps, { yes: true });
+    assert.match(r.steps.find((s) => s.id === 'codex')!.detail, /restart open Codex sessions/);
+    w.deps.refreshCodex = () => { throw new Error('boom'); };
+    r = await runInit(w.deps, { yes: true });
+    const c = r.steps.find((s) => s.id === 'codex')!; assert.equal(c.ok, false); assert.equal(c.fix, 'agentbridge add codex');
+  } finally { w.cleanup(); }
+});
+
 test('stopForeignBridge stops only an agentbridge bridge process', async () => {
   const { stopForeignBridge } = await import('../src/init/deps.ts');
   const killed: number[] = []; let alive = true;

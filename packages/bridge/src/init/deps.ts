@@ -1,6 +1,6 @@
 // Real InitDeps for `agentbridge init`: claude CLI, keychain + presence helper, launchd, local policy, IPC.
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { SETUP_MARKER_FILE, formatSetupMarker, pidAlive } from '@agentbridge/protocol';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
@@ -14,6 +14,8 @@ import { Store } from '../db/store.ts';
 import { PolicyStore } from '../policy/integrity.ts';
 import { applySetting } from '../policy/policy.ts';
 import { IpcClient } from '../ipc/client.ts';
+import { BRIDGE_VERSION } from '../version.ts';
+import { addCodex, BEGIN as CODEX_BEGIN, codexConfigPath } from './codex.ts';
 import { acquireLock } from '../service.ts';
 import type { Paths } from '../paths.ts';
 import { MARKETPLACE_NAME, type ClaudeRunner, type InitDeps, type PolicyAccess, type Prompter } from './init.ts';
@@ -140,6 +142,17 @@ export function realInitDeps(i: RealDepsInput): InitDeps {
       remove: () => { rmSync(join(i.paths.runDir, SETUP_MARKER_FILE), { force: true }); },
     },
     bridgeRunning: () => ping(i.paths.socket),
+    version: BRIDGE_VERSION,
+    async bridgeVersion() {
+      if (!(await ping(i.paths.socket))) return null;
+      const c = await IpcClient.open(i.paths.socket, 'cli');
+      try { return c.bridgeVersion; } finally { c.close(); }
+    },
+    refreshCodex() {
+      const path = codexConfigPath(env);
+      if (!existsSync(path) || !readFileSync(path, 'utf8').includes(CODEX_BEGIN)) return null;
+      return addCodex({ env });
+    },
     async stopBridge() {
       const c = await IpcClient.open(i.paths.socket, 'cli');
       try { await c.request('cli.stop', {}); } finally { c.close(); }

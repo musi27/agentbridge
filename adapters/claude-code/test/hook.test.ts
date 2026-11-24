@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { IPC_METHODS, IPC_PROTOCOL, PERMISSION_MODES } from '@agentbridge/protocol';
 import { HOOK_IPC_PROTOCOL, HOOK_PERMISSION_MODES, buildSessionEvent, runHook } from '../src/hook.ts';
 import { FakeBridge, tempDir } from './helpers.ts';
+import { PLUGIN_VERSION } from '../src/version.ts';
 
 const HOOK_BUNDLE = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'plugin', 'runtime', 'hook.mjs');
 const base = { session_id: 'sess-1', transcript_path: '/tmp/t.jsonl', cwd: '/work/proj' };
@@ -55,7 +56,7 @@ test('runHook sends hello then session_event to the bridge and prints nothing', 
   const out = await runHook(JSON.stringify({ ...base, hook_event_name: 'UserPromptSubmit', permission_mode: 'default', prompt: 'hi' }), { env: { AGENTBRIDGE_SOCKET: bridge.path }, ppid: 999, eventTimeoutMs: 10_000 }); // payloads, not the budget
   assert.equal(out, '');
   assert.deepEqual(bridge.received.map((r) => r.method), ['hello', 'session_event']);
-  assert.deepEqual(bridge.received[0]!.params, { protocol: 1, client: 'hook', client_version: '0.4.0' });
+  assert.deepEqual(bridge.received[0]!.params, { protocol: 1, client: 'hook', client_version: PLUGIN_VERSION });
   assert.deepEqual(bridge.received[1]!.params, { event: 'state', claude_pid: 999, session_id: 'sess-1', permission_mode: 'default', transcript_path: '/tmp/t.jsonl', cwd: '/work/proj' });
 });
 

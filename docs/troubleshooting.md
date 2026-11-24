@@ -162,6 +162,26 @@ Grok's messages are not lost while the bridge is down: the relay holds them for 
 only in memory, so they expire on a restart and the requester is told. A notification summarises what
 happened while the bridge was down.
 
+## After an upgrade, the bridge still runs the old version
+
+**Symptom.** `agentbridge status` or `agentbridge doctor` says *the running bridge is 0.x.y but this agentbridge is
+0.x.z*, or a fix you upgraded for isn't there.
+
+`npm install -g` replaces the files, but the bridge already running keeps the old code. The launchd agent's settings
+don't change on an upgrade, so nothing restarts it until you next log in.
+
+**Fix.**
+
+```bash
+agentbridge init
+```
+
+`init` restarts the bridge on the installed version. Pending approvals expire on the restart; settings, identity and
+conversations are kept. Then restart open Claude Code sessions (or `/reload-plugins`) and Codex sessions.
+
+If you run the bridge without the login service (`init --skip-service`), restart it yourself with
+`agentbridge stop` and then `agentbridge start`.
+
 ## Using a different home folder or JSON output
 
 The bridge keeps its state in `~/.agentbridge`. To use another folder (for example a throwaway test setup), set
