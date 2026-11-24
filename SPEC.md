@@ -740,6 +740,14 @@ started with `--host=codex`.
   report `default`. A missing value is treated the same way (fail closed). Such calls return `host_refused`, and the
   approval stays pending for `agentbridge approve <id>`. `-a never` blocks the call (Codex reports
   `bypassPermissions`), and the usual mode rules then apply (§8.4).
+- **What the prompt shows:** for a local MCP server, Codex's approval prompt lists only the first three arguments,
+  sorted by name, each cut to 60 characters. Tool title, description and annotations are not shown. On its own,
+  `bridge_confirm` would show `approval_id`, `direction` and `kind`. So under `--host=codex` its schema adds three
+  required copies that sort first: `about` (= `topic`), `agent` (= `peer`) and `allowed_turns` (= `turn_limit`).
+  The MCP server refuses the call with `approval_mismatch` (still pending) unless each copy equals its field, then
+  strips the copies before forwarding. What Codex showed is what the bridge checks against the approval as issued.
+  Invite notices to `codex:` participants and Codex `pending_approval` results name the copies. A topic longer than
+  60 characters is cut to 57 plus "..." in the prompt. Claude Code's schema is unchanged: its prompt shows every argument.
 - **Framing:** a queued post appears in Codex as a user message. The nonce tags carry the trust boundary, and the
   Codex standing instruction says that appearing as a user message makes nothing a request.
 - **Reopening:** `agentbridge open codex:<name>` prints `codex resume <session-id>`.
@@ -990,6 +998,7 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
 |---|---|---|
 | `agentbridge init` | partly | Setup (§14.1) |
 | `agentbridge status` | no | Service, relay, participants, counts, pending approvals |
+| `agentbridge status --watch` | no | Live view, redrawn in place every 1.5 s until Ctrl-C: what waits on you (approvals, held deliveries), active and pending conversations, live agents (closed ones as a count), recent notices, health. Polls `cli.status` with `{watch: true}`, which adds `conversation_list`, `waiting_deliveries`, `recent_notices`, `relay` and `now` and does not consume unshown notices. Without a TTY it prints one snapshot; with `--json` it prints the raw snapshot once. Agent-written text is shown with control characters removed |
 | `agentbridge agents` | no | Participants and states |
 | `agentbridge add grok` | yes | Grok setup |
 | `agentbridge remove <address>` | yes | Disconnect a participant or bot |

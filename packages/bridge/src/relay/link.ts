@@ -25,6 +25,8 @@ export interface RelayTransport {
   markActive(): void;
   /** Connect now for a CLI-driven step, regardless of the cap, and stay connected `graceMs` afterwards. */
   ensureConnected(graceMs?: number): Promise<void>;
+  /** Whether a relay connection is up right now (RelayClient has it; test transports may not). */
+  readonly connected?: boolean;
 }
 
 /** Results above this are refused by the relay client (`LIMITS.relayResponseBytes` on PR #3). */
@@ -142,6 +144,8 @@ export class RelayLink {
   attach(transport: RelayTransport, endpoint: RelayEndpoint): void { this.transport = transport; this.ep = endpoint; }
   get configured(): boolean { return this.transport !== null && this.ep !== null; }
   get endpoint(): RelayEndpoint | null { return this.ep; }
+  /** Connection state for `status`: null when not configured or the transport can't tell. */
+  get connected(): boolean | null { return this.transport ? (this.transport.connected ?? null) : null; }
 
   /** Grok activity (a delivery to Grok, a call from Grok): hold the on-demand connection for the next 10 min (§13.2). */
   markActive(): void { try { this.transport?.markActive(); } catch { /* best effort */ } }

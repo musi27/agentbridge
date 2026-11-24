@@ -98,9 +98,11 @@ function humanLine(r: ToolResult): string {
   }
 }
 
-export function renderToolResult(r: ToolResult, nonce: string): { text: string; isError: boolean } {
+export function renderToolResult(r: ToolResult, nonce: string, host: 'claude' | 'codex' = 'claude'): { text: string; isError: boolean } {
   const o = new Out(nonce);
-  o.plain(humanLine(r));
+  o.plain(host === 'codex' && r.status === 'pending_approval'
+    ? 'agentbridge: approval needed. Call bridge_confirm with exactly the approval fields below (topic exactly as in its block), plus about = topic, agent = peer and allowed_turns = turn_limit; the user decides in Codex\'s prompt.'
+    : humanLine(r));
   const head: string[] = [`status=${r.status}`];
   if (r.reason) head.push(`reason=${r.reason}`);
   if (r.conversation_id) head.push(`conversation_id=${r.conversation_id}`);

@@ -715,7 +715,7 @@ export class Engine {
     this.event('info', 'approval_issued', { approval_id: appr.facts.approval_id, kind: 'accept', peer: address(from), conversation_id: c.id }, to.id, c.id);
     const now = this.clock.now();
     this.store.updateConversation(c.id, { invite_issued_at: now, queued: 0, updated_at: now });
-    const notice = N.inviteNotice({ facts: appr.facts, conversationId: c.id, autoModeWarning: to.permission_mode === 'auto', dontAsk: !canConfirm(to.permission_mode) });
+    const notice = N.inviteNotice({ facts: appr.facts, conversationId: c.id, autoModeWarning: to.permission_mode === 'auto', dontAsk: !canConfirm(to.permission_mode), codex: to.agent === 'codex' });
     const d = this.pipeline.enqueue({
       participant_id: to.id, conversation_id: c.id, message_ids: [],
       item: { conversation: this.header(this.store.conversation(c.id)!, to.id), messages: [], notices: [notice], reply_to: null },

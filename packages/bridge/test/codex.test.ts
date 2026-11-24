@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { renderStandingInstruction, STANDING_INSTRUCTION_TEMPLATE, CODEX_WRAPPER_BULLET, IPC_METHODS } from '@agentbridge/protocol';
 import { ipcHarness, cleanup, FakePlugin, hookEvent, inviteFacts } from './ipc-helpers.ts';
 import { IpcClient } from '../src/ipc/client.ts';
+import { inviteNotice } from '../src/core/notices.ts';
 import { addCodex, removeCodex, codexBlock, stripBlock, foreignTables, hasForeignServer, stableNodePath, BEGIN, END, CODEX_HOOK_EVENTS, CODEX_HOOK_NAMES } from '../src/init/codex.ts';
 
 test('codex: registers as codex:<folder>, links the session id, deliveries carry it as thread_id', async () => {
@@ -36,7 +37,11 @@ test('codex: registers as codex:<folder>, links the session id, deliveries carry
     const invite = await cx.waitPost(/approval_id=/);
     assert.equal(cx.threads.at(-1), '01a2-thread');
     assert.match(invite, new RegExp(`ab-notice-${cx.nonce}`));
-    const acc = await cx.tool('bridge_confirm', inviteFacts(invite));
+    // Codex's prompt shows only the first three arguments by name: the invite asks for the display copies too
+    assert.match(invite, /bridge_confirm with: about=<the topic exactly as above>, agent=claude:api, allowed_turns=30, approval_id=/);
+    // an adapter that forwards the copies (older or newer than this bridge) is still accepted
+    const f = inviteFacts(invite);
+    const acc = await cx.tool('bridge_confirm', { ...f, about: f.topic, agent: f.peer, allowed_turns: f.turn_limit });
     assert.ok(['delivered', 'handed_off'].includes(acc.status), acc.status);
     await cx.waitPost(/hi codex/);
     assert.ok(cx.threads.every((t) => t === '01a2-thread'));
@@ -176,4 +181,13 @@ test('add codex / init refresh: tables Codex appended inside the block (hook tru
   assert.ok(t4.includes('[projects."/w/api"]\ntrust_level = "trusted"') && t4.includes('sha256:ccc'));
   // our own tables are never treated as foreign
   assert.equal(foreignTables(codexBlock('/n', '/r')), '');
+});
+
+test('invite notice: only a Codex invitee is asked for the display copies (about, agent, allowed_turns)', () => {
+  const facts = { approval_id: '01JABCDEFGHJKMNPQRSTVWXYZ0', kind: 'accept' as const, peer: 'grok:researcher', direction: 'incoming' as const, topic: 'review', turn_limit: 12 };
+  const accept = (n: { text: string }): string => n.text.split('\n').find((l) => l.startsWith('To accept'))!;
+  const cx = accept(inviteNotice({ facts, conversationId: 'c', autoModeWarning: false, dontAsk: false, codex: true }));
+  assert.match(cx, /^To accept, call bridge_confirm with: about=<the topic exactly as above>, agent=grok:researcher, allowed_turns=12, approval_id=/);
+  const cl = accept(inviteNotice({ facts, conversationId: 'c', autoModeWarning: false, dontAsk: false }));
+  assert.equal(cl, 'To accept, call bridge_confirm with: approval_id=01JABCDEFGHJKMNPQRSTVWXYZ0, kind=accept, peer=grok:researcher, direction=incoming, topic=<exactly as above>, turn_limit=12.');
 });

@@ -48,9 +48,18 @@ Verified with Codex CLI 0.171.0 on macOS, in interactive sessions (`codex` in a 
 When a conversation starts, in either direction, Codex shows:
 
 > Allow the agentbridge MCP server to run tool "bridge_confirm"?
+>
+> about: Compare the two caching designs<br>
+> agent: grok:researcher<br>
+> allowed_turns: 30
 
-with the peer, topic and turn limit, and only **Allow / Cancel**. Choosing Allow is your approval. The other
-agentbridge tools (sending, listing, ending) run without a prompt, as in Claude Code.
+and only **Allow / Cancel**. `about` is the topic, `agent` the other agent and `allowed_turns` the turn limit. Choosing
+Allow is your approval. Codex lists only the first three fields, and cuts a value longer than 60 characters, so a long
+topic ends in "...". agentbridge refuses the approval unless those three match the request exactly, so what you see is
+what you approve.
+
+The other agentbridge tools (sending, listing, ending) run without a prompt. Unlike Claude Code's default mode, you
+don't see outgoing messages before they go ([security.md](security.md#outgoing-messages)).
 
 - **Auto-review (`--approve-for-me`) can't approve conversations.** With auto-review on, a model would answer the
   prompt instead of you, so agentbridge refuses those approvals. The request stays pending: approve it in a terminal

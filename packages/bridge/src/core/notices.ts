@@ -11,7 +11,7 @@ function make(code: string, severity: Severity, parts: NoticePart[]): OutboundNo
 
 const topicPart = (author: string, topic: string): NoticePart => untrusted(`Topic (written by ${author}, untrusted):`, sanitizeLabel(topic));
 
-export interface InviteOpts { facts: ApprovalFacts; conversationId: string; autoModeWarning: boolean; dontAsk: boolean }
+export interface InviteOpts { facts: ApprovalFacts; conversationId: string; autoModeWarning: boolean; dontAsk: boolean; codex?: boolean }
 
 /** §8.1 invite notice: approval facts, topic in an untrusted block, the exact confirm/decline instructions. */
 export function inviteNotice(o: InviteOpts): OutboundNotice {
@@ -19,7 +19,8 @@ export function inviteNotice(o: InviteOpts): OutboundNotice {
   const parts: NoticePart[] = [
     trusted(`${f.peer} wants to start a conversation (turn limit ${f.turn_limit}).`),
     topicPart(f.peer, f.topic),
-    trusted(`To accept, call bridge_confirm with: approval_id=${f.approval_id}, kind=${f.kind}, peer=${f.peer}, direction=${f.direction}, topic=<exactly as above>, turn_limit=${f.turn_limit}.`),
+    // Codex's prompt shows only the first three arguments by name, so a Codex session also passes the display copies.
+    trusted(`To accept, call bridge_confirm with: ${o.codex ? `about=<the topic exactly as above>, agent=${f.peer}, allowed_turns=${f.turn_limit}, ` : ''}approval_id=${f.approval_id}, kind=${f.kind}, peer=${f.peer}, direction=${f.direction}, topic=<exactly as above>, turn_limit=${f.turn_limit}.`),
     trusted(`To decline, call bridge_decline(conversation_id=${o.conversationId}).`),
   ];
   if (o.autoModeWarning) parts.push(trusted(AUTO_MODE_WARNING));

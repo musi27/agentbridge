@@ -212,6 +212,8 @@ export class Store {
     return this.db.all<EventRow>(`SELECT * FROM (SELECT * FROM events ${w} ORDER BY id DESC LIMIT ?) ORDER BY id ASC`, ...vals, opts.limit ?? 200);
   }
   unshownPopups(): EventRow[] { return this.db.all<EventRow>('SELECT * FROM events WHERE popup = 1 AND shown = 0 ORDER BY id'); }
+  /** The newest popups, shown or not (read-only: `status --watch` must not take them from `status`). */
+  recentPopups(limit: number): EventRow[] { return this.db.all<EventRow>('SELECT * FROM events WHERE popup = 1 ORDER BY id DESC LIMIT ?', limit).reverse(); }
   markShown(ids: number[]): void { for (const id of ids) this.db.run('UPDATE events SET shown = 1 WHERE id = ?', id); }
 }
 

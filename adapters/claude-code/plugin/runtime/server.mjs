@@ -29415,6 +29415,32 @@ function codexConfirmGuard(meta3, approvalId) {
   const why = autoReview === true ? "Codex auto-review is on, so this approval would come from a model, not the user" : "Codex did not say whether auto-review is on, so this approval cannot be trusted to come from the user";
   return { status: "failed", reason: "host_refused", hint: `${why}. The request is still pending: ask the user to approve it in a terminal with \`agentbridge approve ${id}\` (or turn auto-review off and call bridge_confirm again).` };
 }
+var CODEX_CONFIRM_DISPLAY = [
+  ["about", "topic"],
+  ["agent", "peer"],
+  ["allowed_turns", "turn_limit"]
+];
+var DISPLAY_KEYS = new Set(CODEX_CONFIRM_DISPLAY.map(([k]) => k));
+function codexConfirmTool(base) {
+  const schema = base.inputSchema;
+  const props = {};
+  for (const [k, of] of CODEX_CONFIRM_DISPLAY) {
+    props[k] = { ...schema.properties[of], description: `Same value as ${of} (Codex shows this field to the user)` };
+  }
+  return {
+    ...base,
+    description: "Confirm a pending approval. The user must approve it in Codex's prompt. Pass exactly the fields you were given, plus about = topic, agent = peer and allowed_turns = turn_limit (the fields Codex shows the user).",
+    inputSchema: { ...schema, properties: { ...props, ...schema.properties }, required: [...CODEX_CONFIRM_DISPLAY.map(([k]) => k), ...schema.required] }
+  };
+}
+function codexConfirmDisplay(args) {
+  const a = args && typeof args === "object" ? args : {};
+  const bad = CODEX_CONFIRM_DISPLAY.filter(([k, of]) => a[k] === void 0 || a[k] !== a[of]).map(([k, of]) => `${k} (= ${of})`);
+  if (bad.length) {
+    return { refused: { status: "failed", reason: "approval_mismatch", hint: `Codex shows the user only about, agent and allowed_turns, so they must equal topic, peer and turn_limit exactly. Missing or different: ${bad.join(", ")}. The request is still pending: call bridge_confirm again with them set.` } };
+  }
+  return { args: Object.fromEntries(Object.entries(a).filter(([k]) => !DISPLAY_KEYS.has(k))) };
+}
 
 // ../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
 function isZ4Schema(s2) {
@@ -31277,9 +31303,9 @@ function humanLine(r) {
       return "agentbridge: failed.";
   }
 }
-function renderToolResult(r, nonce2) {
+function renderToolResult(r, nonce2, host2 = "claude") {
   const o = new Out(nonce2);
-  o.plain(humanLine(r));
+  o.plain(host2 === "codex" && r.status === "pending_approval" ? "agentbridge: approval needed. Call bridge_confirm with exactly the approval fields below (topic exactly as in its block), plus about = topic, agent = peer and allowed_turns = turn_limit; the user decides in Codex's prompt." : humanLine(r));
   const head = [`status=${r.status}`];
   if (r.reason) head.push(`reason=${r.reason}`);
   if (r.conversation_id) head.push(`conversation_id=${r.conversation_id}`);
@@ -31308,7 +31334,7 @@ function renderToolResult(r, nonce2) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.2.3";
+var PLUGIN_VERSION = "0.2.4";
 var PLUGIN_NAME = "agentbridge";
 var MCP_SERVER_NAME = "agentbridge";
 var TOOL_NAME_PREFIX = `mcp__plugin_${PLUGIN_NAME}_${MCP_SERVER_NAME}__`;
@@ -31322,12 +31348,24 @@ function createMcpServer(opts) {
     // Codex doesn't show MCP instructions to the model (§11a); its SessionStart hook injects the Codex wording instead.
     { capabilities: { tools: {} }, instructions: renderStandingInstruction(opts.nonce, opts.host ?? "claude") }
   );
-  server2.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: CLAUDE_TOOLS.map((t) => ({ ...t })) }));
+  const codex = opts.host === "codex";
+  server2.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: CLAUDE_TOOLS.map((t) => codex && t.name === "bridge_confirm" ? codexConfirmTool(t) : { ...t })
+  }));
   server2.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const { name, arguments: args } = req.params;
-    const guard = opts.host === "codex" && name === "bridge_confirm" ? codexConfirmGuard(req.params._meta, args?.["approval_id"]) : null;
+    const { name } = req.params;
+    let args = req.params.arguments;
+    let guard = null;
+    if (codex && name === "bridge_confirm") {
+      guard = codexConfirmGuard(req.params._meta, args?.["approval_id"]);
+      if (!guard) {
+        const shown = codexConfirmDisplay(args);
+        if ("refused" in shown) guard = shown.refused;
+        else args = shown.args;
+      }
+    }
     const result = guard ?? (TOOL_NAMES.has(name) ? await opts.caller.callTool(name, args ?? {}) : { status: "failed", reason: "invalid_message", hint: `Unknown tool ${name}.` });
-    const { text, isError } = renderToolResult(result, opts.nonce);
+    const { text, isError } = renderToolResult(result, opts.nonce, opts.host);
     return { content: [{ type: "text", text }], isError };
   });
   return server2;

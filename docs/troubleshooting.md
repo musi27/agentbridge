@@ -17,7 +17,8 @@ agentbridge doctor
 
 Each failed check prints a fix. `agentbridge doctor grok:<name>` runs the round-trip check for one Grok bot.
 `agentbridge status` shows the service, relay, participants and pending approvals, and `agentbridge logs` shows recent
-events (never message bodies).
+events (never message bodies). `agentbridge status --watch` keeps a live view open: what waits on you (approvals,
+messages held for a session's first prompt), active conversations, live agents, recent notices and health.
 
 Problems connecting a Grok bot are covered in [setup-grok.md](setup-grok.md#troubleshooting).
 

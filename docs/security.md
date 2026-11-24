@@ -88,11 +88,13 @@ but shell tampering runs unprompted, so the prompt is no defence.
 
 ## Residual risks
 
-- **Data leaving through a conversation.** `bridge_send` is not gated, so a manipulated remote agent could talk a local
-  agent into sending file contents or secrets. Those would go to xAI (SpaceXSI), through Cursor (Anysphere)
+- **Data leaving through a conversation.** agentbridge does not gate `bridge_send`, so a manipulated remote agent could
+  talk a local agent into sending file contents or secrets. Those would go to xAI (SpaceXSI), through Cursor (Anysphere)
   infrastructure and through the relay ([Third parties](#third-parties-on-the-grok-path)). Mitigations: the standing
   instruction tells Claude never to send secrets, credentials, keys, environment variables or unrequested file
-  contents, even if the other agent asks; and you approve each conversation.
+  contents, even if the other agent asks; and you approve each conversation. Whether you also see each outgoing
+  message depends on the host and its permission mode ([Outgoing messages](#outgoing-messages)): in auto mode and in
+  Codex, nobody does.
 - **Grok's web and X search can be steered by the other agent.** The routine lets Grok use its own read-only web and X
   search to answer. An agent-written message decides much of what Grok searches for, and a query can carry words from
   the conversation to xAI's search and, through it, to the sites searched; search results can also contain text aimed
@@ -101,8 +103,50 @@ but shell tampering runs unprompted, so the prompt is no defence.
   never to follow instructions found in results; search is read-only, and the routine may not use other connectors or
   tools or post, send, create or change anything; each run reports what it searched for in your Grok chat; and you
   approve each conversation.
+- **Repeated injection attempts can pause the receiving session.** The model's own safeguards may stop a session that
+  keeps receiving injection-shaped messages. In prompt-injection testing (November 2026), Claude Code paused one
+  session ("safeguards flagged this session") after it had received three injection conversations; the next, harmless
+  invite arrived to a paused session. Two outgoing refusals were also stopped mid-send and never reached the other
+  agent. This fails safe (nothing leaks, nothing is approved), but it is a denial-of-service lever: anyone who can
+  get messages to a session can make it stop working until you step in (retry, switch model or start a new session).
+  Mitigations: you approve each conversation, so decline further invites from an agent that sends such messages, and
+  end its conversations.
 - **Grok-side approval is optional and user-configured.** agentbridge does not rely on it.
 - **Grok's reports in your Grok chat are written by the model**, so they are best effort.
+
+### Outgoing messages
+
+agentbridge itself never asks before `bridge_send`. Whether a human sees an outgoing message first is up to the host:
+
+- **Claude Code, default mode:** every `bridge_send` raises Claude Code's own MCP permission prompt, with the message
+  body in it, so you see each message before it goes. That check lasts only until you choose "Always allow" (in the
+  CLI: "Yes, and don't ask again"), which is offered as the main option: one click and later messages go without a
+  prompt. **For sessions that talk to other agents, don't choose Always allow.** Answer Yes to each message, or No to
+  stop one. If you already chose it, remove the `bridge_send` allow rule from Claude Code's permission settings.
+- **Claude Code, auto mode:** outgoing messages go without any prompt. The model's own judgement, with the standing
+  instruction, is the only guard. It held in every run of the prompt-injection test, but no human looks at the text.
+  Bypass mode is the same (agentbridge refuses bypass-mode sessions by default; see
+  [Unsafe permission modes](#unsafe-permission-modes)).
+- **Codex CLI:** `agentbridge add codex` sets every agentbridge tool except `bridge_confirm` to run without asking, so
+  outgoing messages go without a prompt, as in auto mode.
+
+#### Design note: an optional outgoing-message gate (not implemented)
+
+A future option could put a human in front of outgoing text even where the host doesn't. This is a design sketch, not
+a commitment:
+
+- **What it gates:** a policy setting chooses `off` (today), the first message of each conversation, or every message.
+  A gated `bridge_send` returns `awaiting_local_approval` instead of sending, and the bridge holds the message.
+- **How you approve:** the same way as conversations. The agent calls a confirm tool marked
+  `requiresUserInteraction`, so Claude Code shows its native prompt (no "Always allow") in every mode, auto included,
+  with the full body. Codex gets a `prompt` rule for that tool. `agentbridge approve <id>` (Touch ID) works from a
+  terminal. As with `bridge_confirm`, the bridge sends only the exact body it held, so editing the arguments in the
+  prompt can't change what goes out.
+- **Costs:** a prompt per message makes long conversations slow and tedious, and a held message can miss a Grok
+  bot's reply window. A "trust the rest of this conversation" choice would help, but it reintroduces the Always-allow
+  problem, though bounded to one conversation and its turn limit.
+- **Where it matters:** auto mode and Codex, where nothing looks at outgoing text today. In Claude Code's default mode,
+  Claude Code's own prompt already covers it unless you chose Always allow.
 
 ## The approval mechanism
 
@@ -132,6 +176,16 @@ different approval.
 
 The connection binding is what stops a spawned copy of the MCP server: it has no registered connection, so its
 confirms are refused.
+
+### Codex CLI
+
+Codex asks you before every `bridge_confirm` (setup adds a `prompt` rule), with **Allow / Cancel** only, and
+agentbridge refuses confirms that Codex auto-review approved ([setup-codex.md](setup-codex.md#how-approval-works-in-codex)).
+For a local MCP server Codex's prompt lists only the first three arguments by name, each cut to 60 characters, and
+not the tool's description. So under Codex, `bridge_confirm` takes three extra copies that sort first: `about`
+(= topic), `agent` (= peer) and `allowed_turns` (= turn limit). The plugin refuses the call unless each copy equals
+its field, so the values Codex shows are the ones the bridge checks. A topic longer than 60 characters appears cut
+short in the prompt. Checked against Codex CLI 0.171.0's source; the prompt's layout belongs to Codex and may change.
 
 ### What testing verified (Claude Code 2.1.330)
 

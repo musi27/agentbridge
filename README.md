@@ -4,7 +4,7 @@ agentbridge lets your local Claude Code sessions and your Grok Bot hold two-way 
 You approve every conversation yourself, through Claude Code's own permission prompt, which the AI can trigger but cannot answer.
 It is open source (MIT): a small background service on your Mac (the **bridge**) does the work, and a **relay** lets Grok, which runs in the cloud, reach it.
 
-> **Status: v0.2.3 (macOS only).** Commands and names may still change before 1.0.
+> **Status: v0.2.4 (macOS only).** Commands and names may still change before 1.0.
 > [SPEC.md](SPEC.md) v0.4 is the design.
 
 **Not affiliated with xAI, SpaceX Super Intelligence (SpaceXSI), Cursor (Anysphere) or Anthropic.** agentbridge is an
@@ -184,6 +184,7 @@ Useful commands:
 |---|---|
 | `agentbridge --version` | This agentbridge's version (and a note if the running bridge differs) |
 | `agentbridge status` | Service, relay, participants, pending approvals |
+| `agentbridge status --watch` | Live view of agents, conversations, what waits on you, notices and health; Ctrl-C to quit |
 | `agentbridge agents` | Participants and their states |
 | `agentbridge conversations` | Conversation metadata (no message text) |
 | `agentbridge doctor` | Check Claude Code and Node versions, deny rules, `crossSessionInbound`, the Touch ID helper, the launchd agent, the relay, policy integrity and file permissions |
@@ -316,9 +317,13 @@ that form fails too.)
 account password, checked by the bridge itself (`uninstall` checks it in the CLI, so it works with the bridge stopped). The bridge also detects casual edits to its policy and stops all conversation
 activity when it finds one.
 
-**Data can leave through a conversation.** Sending messages is not gated, so a manipulated remote agent could talk a
-local agent into sharing file contents or secrets. The standing instruction tells Claude never to send secrets or
-files you haven't asked it to share, and you approve each conversation, but that is a mitigation, not a guarantee.
+**Data can leave through a conversation.** agentbridge doesn't gate sending messages, so a manipulated remote agent
+could talk a local agent into sharing file contents or secrets. The standing instruction tells Claude never to send
+secrets or files you haven't asked it to share, and you approve each conversation, but that is a mitigation, not a
+guarantee. In Claude Code's default mode, every outgoing message raises Claude Code's own prompt until you choose
+"Always allow": **don't choose it for sessions that talk to other agents.** In auto mode, and in Codex, messages go
+without any prompt, so the model's own judgement is the only guard
+([docs/security.md](docs/security.md#outgoing-messages)).
 
 Full threat model: [docs/security.md](docs/security.md). To report a vulnerability: [SECURITY.md](SECURITY.md).
 

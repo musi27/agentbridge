@@ -12,6 +12,7 @@ import { resolvePaths } from '../paths.ts';
 import { BRIDGE_VERSION, versionMismatch } from '../version.ts';
 import { addGrokFlow, printRoundTrip, revokeGrokFlow, terminalIo, type Io } from './grok.ts';
 import type { RoundTripResult } from '../grok/setup.ts';
+import type { WatchStatus } from './panel.ts';
 import type { RelayRuntime as RelayRuntimeT } from '../relay/runtime.ts';
 
 export const PRIVILEGED = new Set(['config set', 'config verify', 'approve', 'decline', 'extend', 'revoke', 'remove', 'add', 'show', 'end', 'stop', 'identity', 'purge', 'uninstall']);
@@ -52,7 +53,8 @@ export function parseArgs(argv: readonly string[]): Parsed {
 const HELP = `agentbridge — conversations between your Claude Code sessions, Codex CLI sessions and Grok bots
 
 Unprivileged:
-  status | agents | conversations | doctor [grok:<name>] | logs [--limit N] | open <address> | start | config get
+  status [--watch] | agents | conversations | doctor [grok:<name>] | logs [--limit N] | open <address> | start | config get
+  status --watch: live view of agents, conversations, what waits on you, notices and health (Ctrl-C to quit)
 Setup:
   init | add codex | remove codex   (add codex: connect Codex CLI sessions; edits ~/.codex/config.toml)
 Privileged (Touch ID / password, checked by the bridge):
@@ -158,6 +160,30 @@ async function callWithVersion(socket: string, method: string, params: unknown, 
   try { return { result: await c.request(method, params, timeoutMs), bridgeVersion: c.bridgeVersion }; } finally { c.close(); }
 }
 
+/**
+ * `agentbridge status --watch`: redraws in place on a TTY (one IPC connection, polled every 1.5 s); otherwise prints
+ * one snapshot. With --json, prints the raw watch snapshot once (the shape AgentBridge.app will poll).
+ */
+async function watchStatus(socket: string, json: boolean, print: Print, tty: boolean): Promise<number> {
+  const { runWatch } = await import('./watch.ts');
+  let client: IpcClient | null = null;
+  const fetch = async (): Promise<WatchStatus> => {
+    try {
+      if (!client || client.closed) { try { client = await IpcClient.open(socket, 'cli'); } catch { throw new Error('agentbridge is not running (start it with: agentbridge start)'); } }
+      return await client.request<WatchStatus>('cli.status', { watch: true }, 5000);
+    } catch (e) { client?.close(); client = null; throw e; }
+  };
+  try {
+    if (json) { print(JSON.stringify({ ...(await fetch()), cli_version: BRIDGE_VERSION }, null, 2)); return 0; }
+    return await runWatch({
+      fetch, cliVersion: BRIDGE_VERSION, color: !process.env['NO_COLOR'],
+      out: tty
+        ? { isTTY: true, get columns() { return process.stdout.columns; }, write: (x) => { process.stdout.write(x); }, onResize: (fn) => { process.stdout.on('resize', fn); } }
+        : { isTTY: false, write: (x) => { print(x.replace(/\n$/, '')); } },
+    });
+  } finally { (client as IpcClient | null)?.close(); }
+}
+
 /** What to do about a CLI/bridge version mismatch (§14.1 upgrade). */
 export const VERSION_FIX = 'run agentbridge init to restart the bridge on this version';
 
@@ -190,7 +216,11 @@ export function toRequest(p: Parsed): { method: string; params: unknown } {
   const a = [...p.args];
   const need = (n: number, usage: string): void => { if (a.length < n) throw new UsageError(`usage: agentbridge ${usage}`); };
   switch (p.cmd) {
-    case 'status': return { method: 'cli.status', params: {} };
+    case 'status': {
+      const watch = a.includes('--watch'); const rest = a.filter((x) => x !== '--watch');
+      if (rest.length) throw new UsageError('usage: agentbridge status [--watch]');
+      return { method: 'cli.status', params: watch ? { watch: true } : {} };
+    }
     case 'agents': return { method: 'cli.agents', params: {} };
     case 'conversations': return { method: 'cli.conversations', params: {} };
     case 'doctor': return { method: 'cli.doctor', params: a[0] ? { round_trip: a[0] } : {} };
@@ -348,7 +378,9 @@ async function uninstall(home: string | undefined, args: readonly string[], json
   return report.ok ? 0 : 1;
 }
 
-export async function main(argv: readonly string[], print: Print = (s) => process.stdout.write(`${s}\n`), printErr: Print = (s) => process.stderr.write(`${s}\n`), io?: Io): Promise<number> {
+const stdoutPrint: Print = (s) => { process.stdout.write(`${s}\n`); };
+
+export async function main(argv: readonly string[], print: Print = stdoutPrint, printErr: Print = (s) => process.stderr.write(`${s}\n`), io?: Io): Promise<number> {
   let p: Parsed;
   if (argv[0] === '--version' || argv[0] === '-v' || argv[0] === 'version') {
     const h = argv.indexOf('--home'); return await version(h > 0 ? argv[h + 1] : undefined, print);
@@ -372,6 +404,7 @@ export async function main(argv: readonly string[], print: Print = (s) => proces
       if (p.json) print(JSON.stringify({ checks }, null, 2)); else human('doctor', { checks }, print);
       return checks.every((c) => c.ok) ? 0 : 1;
     }
+    if (req.method === 'cli.status' && (req.params as { watch?: boolean }).watch) return await watchStatus(socket, p.json, print, print === stdoutPrint && !io && process.stdout.isTTY === true);
     const { result, bridgeVersion } = await callWithVersion(socket, req.method, req.params, req.method === 'cli.doctor' && (req.params as { round_trip?: string }).round_trip ? 150_000 : undefined);
     let r = result;
     if (req.method === 'cli.doctor' && r && typeof r === 'object' && Array.isArray((r as { checks?: unknown }).checks)) {

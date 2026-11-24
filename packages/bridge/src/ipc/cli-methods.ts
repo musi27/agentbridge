@@ -20,7 +20,12 @@ export interface CliContext {
   grok?: GrokSetup;
   /** Platform checks (Claude Code, helper, launchd, relay) added by the service; see src/doctor.ts. */
   doctorExtras?: () => Promise<Array<{ id: string; ok: boolean; detail: string; fix?: string }>>;
+  /** Relay state for `status --watch`. */
+  relay?: () => { configured: boolean; connected: boolean | null };
 }
+
+/** How many notices `status --watch` gets (newest last). */
+export const WATCH_NOTICES = 5;
 
 type Out = { result?: unknown; error?: IpcError };
 const ok = (result: unknown): Out => ({ result });
@@ -28,6 +33,7 @@ const bad = (code: IpcError['code'], message: string): Out => ({ error: { code, 
 
 const zId = z.object({ conversation_id: z.string() });
 const SCHEMAS: Partial<Record<CliMethod, z.ZodType>> = {
+  'cli.status': z.object({ watch: z.boolean().optional() }),
   'cli.logs': z.object({ limit: z.number().int().min(1).max(1000).optional(), since_id: z.number().int().optional(), type: z.string().optional() }),
   'cli.open': z.object({ address: z.string() }),
   'cli.show': zId.extend({ before_seq: z.number().int().optional(), limit: z.number().int().min(1).max(200).optional() }),
@@ -104,7 +110,21 @@ export async function handleCli(ctx: CliContext, method: CliMethod, raw: unknown
       const parts = store.participants().filter((x) => x.state !== 'gone');
       const convs = store.conversations();
       const ps = engine.policyStore.current();
-      const popups = store.unshownPopups(); store.markShown(popups.map((x) => x.id));
+      // `watch` (status --watch, later AgentBridge.app) is a read-only poll: it adds what the live view needs and leaves
+      // unshown notices for the next plain `status`
+      const watch = p['watch'] === true;
+      const popups = watch ? [] : store.unshownPopups(); if (!watch) store.markShown(popups.map((x) => x.id));
+      const notice = (x: { ts: number; data: string }): object => ({ at: new Date(x.ts).toISOString(), ...(JSON.parse(x.data) as object) });
+      const watchExtras = watch ? {
+        conversation_list: convs.filter((c) => c.state !== 'ended').map((c) => ({
+          id: c.id, initiator: addr(c.initiator_id), invitee: addr(c.invitee_id), topic: c.topic, state: c.state,
+          turn_count: c.turn_count, turn_limit: c.turn_limit, origin: c.origin, queued: !!c.queued, updated_at: new Date(c.updated_at).toISOString(),
+        })),
+        waiting_deliveries: waitingDeliveries(store.pendingDeliveries(), addr),
+        recent_notices: store.recentPopups(WATCH_NOTICES).map(notice),
+        relay: { ...(ctx.relay?.() ?? { configured: false, connected: null }), mode: ps.ok ? ps.policy.transport.relay_mode : null },
+        now: new Date(engine.clock.now()).toISOString(),
+      } : {};
       return ok({
         bridge_version: BRIDGE_VERSION, pid: ctx.pid ?? process.pid, started_at: ctx.startedAt ? new Date(ctx.startedAt).toISOString() : null,
         policy: ps.ok ? { ok: true, version: ps.version, mode: ps.policy.approval.mode } : { ok: false, reason: ps.reason, detail: ps.detail },
@@ -114,7 +134,8 @@ export async function handleCli(ctx: CliContext, method: CliMethod, raw: unknown
         queued_deliveries: store.pendingDeliveries().length,
         pending_approvals: engine.pendingApprovals(),
         live_connections: engine.liveConnections(),
-        notifications: popups.map((x) => ({ at: new Date(x.ts).toISOString(), ...(JSON.parse(x.data) as object) })),
+        notifications: popups.map(notice),
+        ...watchExtras,
       });
     }
     case 'cli.agents':
@@ -255,6 +276,16 @@ export async function handleCli(ctx: CliContext, method: CliMethod, raw: unknown
     default:
       return bad('method_not_found', method);
   }
+}
+
+/** Deliveries not yet handed over, grouped by recipient and why they wait (`hold`; null = being delivered). */
+function waitingDeliveries(rows: ReadonlyArray<{ participant_id: string; hold: string | null }>, addr: (id: string) => string): Array<{ participant: string; hold: string | null; count: number }> {
+  const out = new Map<string, { participant: string; hold: string | null; count: number }>();
+  for (const d of rows) {
+    const k = `${d.participant_id}\0${d.hold ?? ''}`;
+    const e = out.get(k); if (e) e.count++; else out.set(k, { participant: addr(d.participant_id), hold: d.hold, count: 1 });
+  }
+  return [...out.values()];
 }
 
 function grokParticipant(engine: Engine, address: string): string | Out {

@@ -3,7 +3,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { CLAUDE_TOOLS, renderStandingInstruction } from '@agentbridge/protocol';
 import type { ToolResult } from '@agentbridge/protocol';
-import { codexConfirmGuard } from './codex.ts';
+import { codexConfirmDisplay, codexConfirmGuard, codexConfirmTool } from './codex.ts';
 import type { Host } from './codex.ts';
 import { renderToolResult } from './render.ts';
 import { MCP_SERVER_NAME } from './version.ts';
@@ -20,15 +20,26 @@ export function createMcpServer(opts: { nonce: string; version: string; caller: 
     { capabilities: { tools: {} }, instructions: renderStandingInstruction(opts.nonce, opts.host ?? 'claude') },
   );
   // Tool defs are passed through verbatim, including bridge_confirm's `_meta["anthropic/requiresUserInteraction"]`.
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: CLAUDE_TOOLS.map((t) => ({ ...t })) }));
+  // Under Codex, bridge_confirm also takes the display copies Codex's approval prompt shows (see codexConfirmTool).
+  const codex = opts.host === 'codex';
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: CLAUDE_TOOLS.map((t) => (codex && t.name === 'bridge_confirm' ? codexConfirmTool(t) : { ...t })),
+  }));
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const { name, arguments: args } = req.params;
-    const guard = opts.host === 'codex' && name === 'bridge_confirm'
-      ? codexConfirmGuard(req.params._meta, (args as Record<string, unknown> | undefined)?.['approval_id']) : null;
+    const { name } = req.params;
+    let args: unknown = req.params.arguments;
+    let guard: ToolResult | null = null;
+    if (codex && name === 'bridge_confirm') {
+      guard = codexConfirmGuard(req.params._meta, (args as Record<string, unknown> | undefined)?.['approval_id']);
+      if (!guard) {
+        const shown = codexConfirmDisplay(args);
+        if ('refused' in shown) guard = shown.refused; else args = shown.args;
+      }
+    }
     const result: ToolResult = guard ?? (TOOL_NAMES.has(name)
       ? await opts.caller.callTool(name, args ?? {})
       : { status: 'failed', reason: 'invalid_message', hint: `Unknown tool ${name}.` });
-    const { text, isError } = renderToolResult(result, opts.nonce);
+    const { text, isError } = renderToolResult(result, opts.nonce, opts.host);
     return { content: [{ type: 'text', text }], isError };
   });
   return server;

@@ -102,7 +102,7 @@ export async function startBridge(o: BridgeServiceOptions): Promise<BridgeServic
   svc.relay = new RelayLink({ engine: svc.engine, ...(o.relay ? { transport: o.relay.transport, endpoint: o.relay.endpoint } : {}) });
   svc.relay.startReplyWatch(); // §13.2 "reply awaited"
   svc.grok = new GrokSetup({ engine: svc.engine, link: svc.relay, secrets: o.secrets, ...(adapters.grok ? { adapter: adapters.grok } : {}), ...(o.grokRoundTripMs !== undefined ? { roundTripMs: o.grokRoundTripMs } : {}) });
-  svc.ipc = new IpcServer({ engine: svc.engine, socketPath: paths.socket, runDir: paths.runDir, peer: o.peer ?? new LsofPeerResolver(), cli: { paths: { db: paths.db, socket: paths.socket, runDir: paths.runDir }, pid: process.pid, startedAt: Date.now(), grok: svc.grok, ...(o.doctorExtras ? { doctorExtras: o.doctorExtras } : {}) } });
+  svc.ipc = new IpcServer({ engine: svc.engine, socketPath: paths.socket, runDir: paths.runDir, peer: o.peer ?? new LsofPeerResolver(), cli: { paths: { db: paths.db, socket: paths.socket, runDir: paths.runDir }, pid: process.pid, startedAt: Date.now(), grok: svc.grok, relay: () => ({ configured: svc.relay.configured, connected: svc.relay.connected }), ...(o.doctorExtras ? { doctorExtras: o.doctorExtras } : {}) } });
   try { await svc.engine.start(); await svc.ipc.listen(); }
   catch (e) { svc.engine.stop(); db.close(); release(); throw e; }
   return svc;
