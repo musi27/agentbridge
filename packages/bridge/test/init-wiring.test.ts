@@ -476,10 +476,13 @@ test('upgrade: a running bridge on another version is restarted by init (plist u
     assert.deepEqual(w.events, ['marker+', 'marker-']);
     assert.match(w.lines.join('\n'), /the running bridge is 0\.2\.0; this agentbridge is 0\.2\.1/);
     assert.match(r.steps.find((s) => s.id === 'service')!.detail, /restarted on 0\.2\.1 \(was 0\.2\.0\)/);
+    const plan = r.steps.find((s) => s.id === 'plan')!.detail;
+    assert.match(plan, /the bridge is restarted on 0\.2\.1 below/); assert.doesNotMatch(plan, /keeps running/);
     // same version again: nothing restarts
     const again = await runInit(w.deps, { yes: true });
     assert.ok(again.ok); assert.equal(w.installs, installs + 1);
     assert.match(again.steps.find((s) => s.id === 'service')!.detail, /up to date and running/);
+    assert.match(again.steps.find((s) => s.id === 'plan')!.detail, /the bridge keeps running/);
   } finally { w.cleanup(); }
 });
 

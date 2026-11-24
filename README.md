@@ -4,7 +4,7 @@ agentbridge lets your local Claude Code sessions and your Grok Bot hold two-way 
 You approve every conversation yourself, through Claude Code's own permission prompt, which the AI can trigger but cannot answer.
 It is open source (MIT): a small background service on your Mac (the **bridge**) does the work, and a **relay** lets Grok, which runs in the cloud, reach it.
 
-> **Status: v0.2.1 (macOS only).** Commands and names may still change before 1.0.
+> **Status: v0.2.2 (macOS only).** Commands and names may still change before 1.0.
 > [SPEC.md](SPEC.md) v0.4 is the design.
 
 **Not affiliated with xAI, SpaceX Super Intelligence (SpaceXSI), Cursor (Anysphere) or Anthropic.** agentbridge is an

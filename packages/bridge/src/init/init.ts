@@ -258,7 +258,7 @@ export async function runInit(deps: InitDeps, o: InitOptions = {}): Promise<Init
 
     if (writes.length === 0) {
       // 8a. nothing to write: no need to stop the bridge
-      step({ id: 'plan', ok: true, detail: 'identity, relay and approval mode are already set; the bridge keeps running' }, deps, steps);
+      step({ id: 'plan', ok: true, detail: `identity, relay and approval mode are already set; ${stale && needService ? `the bridge is restarted on ${deps.version} below` : 'the bridge keeps running'}` }, deps, steps);
       if (!(await configure())) return { ok: false, steps, userId };
     } else {
       // 8b. stop the bridge (launchd: bootout, keeping the plist) so its in-memory state can't overwrite the writes,

@@ -65,11 +65,13 @@ Version: agentbridge --version   (upgrade: npm install -g @musi27/agentbridge, t
 
 type Print = (s: string) => void;
 
-type AgentRow = { address: string; title?: string; state: string; permission_mode: string; short_id: string; folder?: string };
+export type AgentRow = { address: string; title?: string; state: string; permission_mode: string; short_id: string; folder?: string };
 const UNKNOWN_MODE_NOTE = '(waiting for first prompt: messages to that session are held until someone types in it)';
+/** Only a live session can be waiting for its first prompt; a closed one's unknown mode is just stale. */
+const waitsForFirstPrompt = (p: AgentRow): boolean => p.state === 'live' && p.permission_mode === 'unknown';
 /** One agent per line: address, state, mode, short id, folder, then Claude Code's session title. */
-function agentLine(p: AgentRow): string {
-  const mode = p.permission_mode === 'unknown' ? 'waiting for first prompt' : p.permission_mode;
+export function agentLine(p: AgentRow): string {
+  const mode = p.permission_mode !== 'unknown' ? p.permission_mode : waitsForFirstPrompt(p) ? 'waiting for first prompt' : '-';
   return `${p.address.padEnd(28)} ${p.state.padEnd(12)} ${mode.padEnd(24)} ${p.short_id}${p.folder ? `  ${p.folder}` : ''}${p.title ? `  "${p.title}"` : ''}`;
 }
 
@@ -82,7 +84,7 @@ function human(cmd: string, r: unknown, print: Print): void {
     if (vm) print(`warning: ${vm}; ${VERSION_FIX}`);
     print(`conversations: ${s.conversations['active']} active, ${s.conversations['pending']} pending, ${s.conversations['ended']} ended; ${s.queued_deliveries} queued deliveries`);
     for (const p of s.participants) print(`  ${agentLine(p)}`);
-    if (s.participants.some((p) => p.permission_mode === 'unknown')) print(UNKNOWN_MODE_NOTE);
+    if (s.participants.some((p) => waitsForFirstPrompt(p))) print(UNKNOWN_MODE_NOTE);
     for (const a of s.pending_approvals) print(`  approval ${a.approval_id} ${a.kind} ${a.participant} ↔ ${a.peer}${a.expires_in_s !== null ? ` (expires in ${a.expires_in_s}s)` : ''}`);
     if (s.auto_mode_sessions.length) print(`warning: sessions in Claude Code auto mode: ${s.auto_mode_sessions.join(', ')}`);
     for (const n of s.notifications) print(`notice ${n.at}: ${n.title} — ${n.body}`);
@@ -91,7 +93,7 @@ function human(cmd: string, r: unknown, print: Print): void {
   if (cmd === 'agents') {
     const ps = rows(r) as unknown as AgentRow[];
     for (const p of ps) print(agentLine(p));
-    if (ps.some((p) => p.permission_mode === 'unknown')) print(UNKNOWN_MODE_NOTE);
+    if (ps.some((p) => waitsForFirstPrompt(p))) print(UNKNOWN_MODE_NOTE);
     return;
   }
   if (cmd === 'conversations') { for (const c of rows(r)) print(`${c['id']}  ${String(c['state']).padEnd(7)} ${String(c['turns']).padEnd(7)} ${c['initiator']} → ${c['invitee']}  ${c['end_reason'] ?? ''}`); return; }
