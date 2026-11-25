@@ -89,6 +89,23 @@ dialogs disallowed (`SecKeychainSetUserInteractionAllowed(false)`), so a read th
 | move SIGKILLed after each of its 28 helper calls in turn, then build 2 runs | 28/28 recovered, all 11 secrets, old items gone |
 | access-list description of the item | `agentbridge: saved keys` |
 
+### The 0.2.7 upgrade, reproduced (0.2.8)
+
+The owner's 0.2.6 → 0.2.7 upgrade asked many times: old items that trusted only older ad-hoc builds were read once by
+`init` and again at every bridge start, and a refused delete stopped the move. Step 4 of the same script (2026-11-25):
+two of the 11 old items saved by the ad-hoc probe, the rest by Developer ID build 1; `init` with a bridge running, then
+three bridge starts, all with Developer ID build 2 and dialogs disallowed (a refused read is a dialog in real life).
+
+| Step | 0.2.7 store | 0.2.8 store |
+|---|---|---|
+| `init`, bridge running (copy only) | 1 read refused; move stops, nothing copied | each ad-hoc item read once (2), the other 9 copied; init stops, nothing lost |
+| bridge starts 1, 2, 3 | 1 refused read **each start**; nothing ever moves | **0 reads**; start 1 deletes the 9 copied items |
+| delete of an item only the ad-hoc build trusts, by build 2 | silent | silent |
+
+Deletes refused for items whose partition list lacks the team happen on the login keychain only:
+`security set-generic-password-partition-list` exits 0 on a throwaway keychain but adds no partition entry. That case is
+covered by the fake keychain in `packages/presence/test/keychain-upgrade.test.ts`.
+
 ## Moving from ad hoc to Developer ID: one prompt per item, once
 
 Items saved by an ad-hoc helper trust that build's cdhash. The first Developer ID helper is a different identity, so

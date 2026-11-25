@@ -134,9 +134,12 @@ async function offlineDoctor(home: string | undefined): Promise<Array<{ id: stri
   const { pidAlive } = await import('@agentbridge/protocol');
   const claude = new ClaudeCodeAdapter(() => null, { claudeVersion: claudeVersionRunner() });
   const launchd = new presence.LaunchdServiceManager();
+  const { knownSecretNames } = await import('../init/secret-names.ts');
+  // old keychain items: attributes only (no secret, no dialog)
+  const kc = process.platform === 'darwin' ? new presence.MacKeychainStore() : null;
   return [
     { id: 'bridge', ok: false, detail: 'the bridge is not running (relay identity and session checks need it)', fix: 'agentbridge start' },
-    ...await platformDoctor({ claude: () => claude.doctor(), helper: () => presence.verifyHelper(), launchd: () => launchd.status(), launchdProgram: () => launchdProgramChecks(launchd.plistPath), launchdOwner: async () => ownerCheck(await launchdOwner(launchd.serviceTarget, resolvePaths(home).lock, pidAlive)), relay: { policy: () => policy, secrets: null } }),
+    ...await platformDoctor({ claude: () => claude.doctor(), helper: () => presence.verifyHelper(), launchd: () => launchd.status(), launchdProgram: () => launchdProgramChecks(launchd.plistPath), launchdOwner: async () => ownerCheck(await launchdOwner(launchd.serviceTarget, resolvePaths(home).lock, pidAlive)), ...(kc ? { keychain: { service: kc.service, leftovers: async () => kc.leftovers(await knownSecretNames(paths.db)) } } : {}), relay: { policy: () => policy, secrets: null } }),
   ];
 }
 
@@ -298,6 +301,9 @@ export async function runService(home: string | undefined, print: Print): Promis
         notice: (l) => { print(`keychain: ${l}`); void platform.notifier.notify({ title: 'AgentBridge', body: l }).catch(() => {}); },
       });
       if (r.copied > 0 || r.removed > 0) print(`keychain: moved ${r.copied} saved keys into one item ("agentbridge: saved keys"); deleted ${r.removed} old items`);
+      // not retried by this build (no dialog on every start); doctor lists them with the command to delete them
+      if (r.kept) print(`keychain: ${r.kept} old keychain item(s) could not be deleted (their keys are already moved); see agentbridge doctor`);
+      if (r.unread) print(`keychain: ${r.unread} old keychain item(s) could not be read; run agentbridge init to try again`);
     } catch (e) { print(`keychain: ${(e as Error).message}`); }
   }
   const launchd = new presence.LaunchdServiceManager();
@@ -318,6 +324,7 @@ export async function runService(home: string | undefined, print: Print): Promis
       helper: () => presence.verifyHelper(),
       launchd: () => launchd.status(),
       launchdProgram: () => launchdProgramChecks(launchd.plistPath), launchdOwner: async () => ownerCheck(await launchdOwner(launchd.serviceTarget, resolvePaths(home).lock, pidAlive)),
+      ...(platform.secrets.leftovers ? { keychain: { service: presence.KEYCHAIN_SERVICE, leftovers: async () => platform.secrets.leftovers!(await (await import('../init/secret-names.ts')).knownSecretNames(paths.db)) } } : {}),
       relay: { policy: () => (svc.engine.policyStore.current().ok ? svc.engine.policyStore.policy() : null), secrets: platform.secrets, connected: () => relay?.client.connected ?? null },
     }),
   });
@@ -411,7 +418,7 @@ export async function main(argv: readonly string[], print: Print = stdoutPrint, 
     if (req.method === 'cli.add_grok') return await addGrokFlow((m, x, t) => call(socket, m, x, t), io ?? terminalIo());
     if (req.method === 'cli.revoke' && String(p.args[0]).startsWith('grok:')) return await revokeGrokFlow((m, x, t) => call(socket, m, x, t), io ?? terminalIo(), String(p.args[0]));
     if (req.method === 'cli.doctor' && !(req.params as { round_trip?: string }).round_trip && !(await ping(socket))) {
-      // no bridge: run the platform checks locally (never touches the keychain), so doctor helps before `start`
+      // no bridge: run the platform checks locally (never reads a secret: keychain item attributes only), so doctor helps before `start`
       const checks = await offlineDoctor(p.home);
       if (p.json) print(JSON.stringify({ checks }, null, 2)); else human('doctor', { checks }, print);
       return checks.every((c) => c.ok) ? 0 : 1;

@@ -134,18 +134,29 @@ missing (mid-write) waits for the lock.
 
 **Moving from one item per secret (0.2.6 and earlier).** Those releases saved each secret as its own item (account =
 the secret name: identity keys, policy key, version and snapshot, three per Grok bot). `prepare()` (run by `init` and
-at bridge start, before any read) reads them all, writes the combined item, reads it back to verify, and only then
-deletes them. Rule: **the combined item is authoritative for every name it holds; an old item only fills a name it
-lacks.** So a move interrupted anywhere loses nothing, and running it again is harmless. `get` also falls back to an
-old item for a missing name, and `delete` removes the old item too. Items the helper created read silently for it, and
-deleting an item never needs its access list, so for a 0.2.6 user (signed helper, items already allowed) the move shows
-no dialog. Items saved by an ad-hoc build (0.2.5 and earlier) ask once each, one last time. `init` only copies while an
-older bridge is still running (it may still read the old items); the new bridge deletes them when it starts.
+at bridge start, before any read) reads the ones whose name the combined item lacks, writes the combined item, reads
+it back to verify, and only then deletes the old items. Rule: **the combined item is authoritative for every name it
+holds; an old item only fills a name it lacks, and is never read once the combined item holds its name** (only
+deleted). So a move interrupted anywhere loses nothing, running it again is harmless, and an old item that trusts only
+an older build (each read can ask for the login password) is read at most once: when `init` copies while an older
+bridge still runs, the new bridge's start only deletes. `get` falls back to an old item only for a name the combined
+item lacks and that did not fail before; `delete` removes the old item too.
 
-**Warning before a dialog.** `prepare()` prints one line first when macOS is likely to ask: old items are about to be
-read, or the combined item exists but the helper's code identity differs from the one recorded after the last
-successful read (`run/keychain-trust.json`: `team:<id>/<identifier>` for Developer ID, `cdhash:<hash>` for ad hoc,
-read with `codesign -d`). Existence is checked with `security find-generic-password` without `-g`, which reads
+**Failures don't stop the move or loop.** A read macOS refuses (Deny) or a delete it refuses (seen on the login
+keychain for items whose partition list lacks the helper's team; on a throwaway keychain deletes by another build
+always succeed) is skipped and remembered in `run/keychain-trust.json` with the helper build (cdhash) it failed on.
+The same build does not try it again, so the bridge never asks on every start; the next release tries once more.
+`init` retries refused reads (a person is there) and stops if one is still refused, with nothing lost. A dialog that
+could not be shown (`errSecInteractionNotAllowed`, e.g. a locked keychain) is not remembered. `leftovers()` lists old
+items still present (attributes only) for `agentbridge doctor`, which prints `security delete-generic-password -s
+agentbridge -a <name>` for each.
+
+**Warning before a dialog.** `prepare()` prints one line first when macOS is likely to ask: old items whose name the
+combined item lacks are about to be read (only those are counted), or the combined item exists but the helper's code
+identity differs from the one recorded after the last successful read (`run/keychain-trust.json`:
+`team:<id>/<identifier>` for Developer ID, `cdhash:<hash>` for ad hoc, read with `codesign -d`). A trusted helper reads
+the combined item first to count exactly; otherwise the count uses the names (never values) the combined item held last
+time, from the same file. Existence is checked with `security find-generic-password` without `-g`, which reads
 attributes only: no dialog, no value. The helper cannot read without UI today, so this predicts from the recorded
 identity rather than asking the keychain. One false positive is known: 0.2.6 recorded no identity, so the first move
 after it warns although nothing asks. At bridge start the line is also posted as a notification, since launchd has no

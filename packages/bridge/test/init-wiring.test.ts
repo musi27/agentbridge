@@ -233,6 +233,12 @@ test('doctor: platform checks (Claude adapter, helper, launchd, relay health + s
   });
   assert.deepEqual(checks.map((c) => [c.id, c.ok]), [['claude_code_version', true], ['presence_helper', false], ['launchd', false], ['relay_health', true], ['relay_identity', true]]);
   assert.match(checks.find((c) => c.id === 'relay_identity')!.detail, /2 waiting; idle/);
+  // old keychain items macOS refused to delete: listed with the exact command
+  const kc = await platformDoctor({ keychain: { service: 'agentbridge', leftovers: async () => ['policy.snapshot', 'bot.g.webhook_key'] } });
+  assert.deepEqual(kc.map((c) => [c.id, c.ok]), [['keychain', false]]);
+  assert.match(kc[0]!.detail, /^2 old keychain items left \(policy\.snapshot, bot\.g\.webhook_key\)/);
+  assert.equal(kc[0]!.fix, 'security delete-generic-password -s agentbridge -a policy.snapshot; security delete-generic-password -s agentbridge -a bot.g.webhook_key');
+  assert.deepEqual((await platformDoctor({ keychain: { service: 'agentbridge', leftovers: async () => [] } })).map((c) => [c.id, c.ok]), [['keychain', true]]);
   assert.deepEqual(seen, ['GET /v1/health', 'POST /v1/pending']);
   const h = await harness();
   const out = await handleCli({ engine: h.engine, doctorExtras: async () => checks }, 'cli.doctor', {});
@@ -369,13 +375,13 @@ test('init: the keychain step runs after the presence check and before the first
     const w = world({ running });
     const get = w.secrets.get.bind(w.secrets);
     w.secrets.get = async (n) => { events.push(`get ${n}`); return get(n); };
-    const calls: { legacyNames: readonly string[]; keepLegacy: boolean | undefined }[] = [];
+    const calls: { legacyNames: readonly string[]; keepLegacy: boolean | undefined; interactive: boolean | undefined }[] = [];
     (w.secrets as SecretStore).prepare = async (o) => {
       events.push(`prepare after ${w.presence.reasons.length} presence check(s)`);
-      calls.push({ legacyNames: o.legacyNames, keepLegacy: o.keepLegacy });
+      calls.push({ legacyNames: o.legacyNames, keepLegacy: o.keepLegacy, interactive: o.interactive });
       if (notice) o.notice(notice);
       if (fail) throw new Error('User interaction is not allowed.');
-      return { warned: notice !== null, asks: notice ? 1 : 0, copied: 2, removed: 0 };
+      return { warned: notice !== null, asks: notice ? 1 : 0, copied: 2, removed: 0, kept: running ? 0 : 1 };
     };
     w.deps.secretNames = async () => ['identity.ed25519', 'bot.b1.token'];
     try { return { r: await runInit(w.deps, { yes: true }), w, calls }; } finally { w.cleanup(); }
@@ -384,7 +390,10 @@ test('init: the keychain step runs after the presence check and before the first
   assert.ok(a.r.ok, a.w.lines.join('\n'));
   assert.equal(events[0], 'prepare after 1 presence check(s)');
   assert.ok(events.slice(1).every((e) => e.startsWith('get ')));
-  assert.deepEqual(a.calls, [{ legacyNames: ['identity.ed25519', 'bot.b1.token'], keepLegacy: false }]);
+  // interactive: a person is at the terminal, so init retries old items whose read was refused before
+  assert.deepEqual(a.calls, [{ legacyNames: ['identity.ed25519', 'bot.b1.token'], keepLegacy: false, interactive: true }]);
+  // an old item macOS refused to delete: reported, init still succeeds (the key is already moved)
+  assert.ok(a.r.steps.some((s) => s.id === 'keychain_old_items' && s.ok && /1 old keychain item\(s\) left .*agentbridge doctor/.test(s.detail)));
   const i = a.w.lines.findIndex((l) => l.startsWith('macOS may ask'));
   assert.ok(i > 0 && a.w.lines[i + 1]!.includes('moved 2 saved keys into one keychain item ("agentbridge: saved keys")'), a.w.lines.join('\n'));
   assert.ok(a.r.steps.some((s) => s.id === 'keychain' && s.ok));

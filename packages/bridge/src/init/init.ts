@@ -169,8 +169,10 @@ export async function runInit(deps: InitDeps, o: InitOptions = {}): Promise<Init
   // read the old items, so they are only copied here; the bridge deletes them when it starts on this version.
   if (deps.secrets.prepare) {
     try {
-      const r = await deps.secrets.prepare({ legacyNames: (await deps.secretNames?.()) ?? allSecretNames([]), notice: (l) => deps.print(l), keepLegacy: await deps.bridgeRunning() });
+      const r = await deps.secrets.prepare({ legacyNames: (await deps.secretNames?.()) ?? allSecretNames([]), notice: (l) => deps.print(l), keepLegacy: await deps.bridgeRunning(), interactive: true });
       if (r.copied > 0) step({ id: 'keychain', ok: true, detail: `moved ${r.copied} saved keys into one keychain item ("agentbridge: saved keys")` }, deps, steps);
+      // not an init failure: the keys are already moved; doctor shows the command to delete what macOS kept
+      if (r.kept) step({ id: 'keychain_old_items', ok: true, detail: `${r.kept} old keychain item(s) left (macOS refused to delete them; their keys are already moved); agentbridge doctor shows how to delete them` }, deps, steps);
     } catch (e) {
       step({ id: 'keychain', ok: false, detail: `keychain: ${(e as Error).message}`, fix: 'run agentbridge init again; if macOS asks for your login password, enter it and choose Always Allow' }, deps, steps);
       return { ok: false, steps, userId };

@@ -19,6 +19,8 @@ export interface SecretStore {
   prepare?(o: SecretStorePrepareOptions): Promise<SecretStorePrepareResult>;
   /** Optional: delete every secret, including older-layout items named in `legacyNames`. Returns how many were removed. */
   purge?(legacyNames: readonly string[]): Promise<number>;
+  /** Optional: older-layout items still present among `legacyNames` (no secret read, no OS prompt). For doctor. */
+  leftovers?(legacyNames: readonly string[]): Promise<string[]>;
 }
 
 export interface SecretStorePrepareOptions {
@@ -28,6 +30,8 @@ export interface SecretStorePrepareOptions {
   notice(line: string): void;
   /** Copy older-layout items but don't delete them yet (an older bridge may still be running). */
   keepLegacy?: boolean;
+  /** A person is at the terminal (init): retry items whose read was refused before, and throw if one still is. */
+  interactive?: boolean;
 }
 
 export interface SecretStorePrepareResult {
@@ -39,6 +43,10 @@ export interface SecretStorePrepareResult {
   copied: number;
   /** Older-layout items deleted. */
   removed: number;
+  /** Older-layout items left because the OS refused to delete them (not retried by the same helper build). */
+  kept?: number;
+  /** Older-layout items whose read was refused, so their secret was not copied (still in the old item). */
+  unread?: number;
 }
 
 /** Every secret name the bridge may have saved, given the bot ids it knows. */

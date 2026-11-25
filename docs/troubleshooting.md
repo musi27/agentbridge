@@ -229,14 +229,32 @@ identity is "this team's AgentBridge", which later releases keep: updates don't 
 secrets live in **one** keychain item, `agentbridge: saved keys`, so if macOS ever does have to ask again (a helper you
 built from source, a keychain moved to another Mac), it asks once, not once per secret.
 
-The first run of that release moves the old items (one per secret: identity keys, policy key, version and snapshot,
-three per Grok bot) into the one item, checks it, then deletes them. It prints "AgentBridge is moving its N saved keys
-into one keychain item…" first. If you came from 0.2.6 and allowed its prompts, nothing asks. If you skipped 0.2.6 and
-come from 0.2.5 or earlier, macOS asks once per old item, this last time.
+The first run of that release (0.2.7) moves the old items (one per secret: identity keys, policy key, version and
+snapshot, three per Grok bot) into the one item, checks it, then deletes them. It prints "AgentBridge is moving N saved
+keys into one keychain item…" first. An old item that 0.2.6's signed helper never read (the policy snapshot is rarely
+read) or that you allowed with **Allow** rather than **Always Allow** still trusts only an older build, so macOS asks
+for it. In 0.2.7 that could happen more than once per item, and a refused delete stopped the move and made every
+bridge start ask again. Since 0.2.8 an old item is read only while its key is missing from the one item, so each asks
+at most once, and later starts read none of them.
 
 **Fix.** Enter your login password and choose **Always Allow**. **Deny** makes that read fail: init stops with a
-keychain error and nothing is lost (the old items are deleted only after the new one reads back correctly). Run
-`agentbridge init` again and allow it.
+keychain error and nothing is lost (the old item stays until its key has been copied and read back). Run
+`agentbridge init` again and allow it. A bridge started by launchd does not ask again for an item you denied (until the
+next release); `agentbridge init` does.
+
+## `agentbridge doctor` says "N old keychain items left"
+
+**Cause.** The key in each listed item is already in `agentbridge: saved keys`, but macOS refused to let AgentBridge
+delete the old item (it happens for items whose access list names only an older, ad-hoc build). AgentBridge tries each
+such delete once per release and does not keep asking.
+
+**Fix.** Delete them yourself; doctor prints the exact commands, one per item:
+
+```bash
+security delete-generic-password -s agentbridge -a policy.snapshot
+```
+
+Deleting reads no secret. If macOS asks for your login password, that is the item's access list; enter it.
 
 If a signed release keeps asking on every update, check the installed helper's signature:
 `codesign -dv "$(npm root -g)/@musi27/agentbridge/bin/AgentBridge.app" 2>&1 | grep -E 'TeamIdentifier|Signature'`

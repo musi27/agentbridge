@@ -10,14 +10,18 @@
 //   1. the old layout (one item per secret, 2 Grok bots = 11 items) saved by Developer ID build 1 → migration → no
 //      dialog, every secret readable, old items gone, one item "saved keys" left;
 //   2. that item read by Developer ID build 2 → silent; control: the ad-hoc build is refused (would ask) and warned;
-//   3. migration SIGKILLed after each helper call in turn → the next run (build 2) recovers with nothing lost.
+//   3. migration SIGKILLed after each helper call in turn → the next run (build 2) recovers with nothing lost;
+//   4. the 0.2.7 upgrade case: two old items saved by an older AD-HOC build (trust only its cdhash), the rest by
+//      Developer ID; a bridge running during init (init copies, the bridge start deletes). Each read of an ad-hoc item
+//      by a Developer ID build is one dialog in real life (here: refused). Shows each is read at most once per build,
+//      never on later starts, and how deletes of items another build created behave with dialogs disallowed.
 // --show-dialog: last, the ad-hoc probe reads with dialogs allowed, so you see the real dialog text. Click Deny.
 // Signing uses the "Developer ID Application" identity of the project's team, by SHA-1 (as sign-helper does).
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { allSecretNames } from '@agentbridge/protocol';
+import { allSecretNames, SECRET_NAMES } from '@agentbridge/protocol';
 import { COMBINED_ACCOUNT, MacKeychainStore, STAGING_ACCOUNT } from '../src/keychain.ts';
 import { run, type Runner } from '../src/exec.ts';
 import { PRESENCE_DIR, TEAM_ID } from './signed-helper.ts';
@@ -79,6 +83,7 @@ const onlyCombined = () => JSON.stringify(accounts()) === JSON.stringify([COMBIN
 const st = () => mkdtempSync(join(work, 'state-'));
 const seedOld = async (helper: string) => { const s = storeFor(kc, helper, st()); for (const n of NAMES) await s.items.set(n, value(n)); };
 const allPresent = async (s: MacKeychainStore) => { for (const n of NAMES) if ((await s.get(n)) !== value(n)) return false; return true; };
+const allPresentExcept = async (s: MacKeychainStore, skip: string[]) => { for (const n of NAMES) if (!skip.includes(n) && (await s.get(n)) !== value(n)) return false; return true; };
 
 try {
   console.log('building probes (ad hoc, Developer ID ×2); macOS may ask to allow codesign to use the key');
@@ -124,6 +129,34 @@ try {
     console.log(`      killed after call ${k}: ${left.length} items${left.includes(STAGING_ACCOUNT) ? ' (incl. update item)' : ''}${left.includes(COMBINED_ACCOUNT) ? ' (incl. combined)' : ''} → ${ok ? 'recovered' : 'LOST'}`);
   }
   check(recovered === calls, `migration killed after each of its ${calls} helper calls: ${recovered}/${calls} recovered by build 2, nothing lost`);
+
+  // 4.
+  freshKeychain(true);
+  const UNTRUSTED = [SECRET_NAMES.policySnapshot, SECRET_NAMES.webhookKey('b1')];
+  { const a = storeFor(kc, ADHOC, st()); const d = storeFor(kc, DEV1, st()); for (const n of NAMES) await (UNTRUSTED.includes(n) ? a : d).items.set(n, value(n)); }
+  const s4 = st(); let untrustedReads = 0; const b4 = runnerFor(kc);
+  const counting: Runner = async (f, a, o) => { if (f === DEV2 && a[0] === 'keychain-get' && UNTRUSTED.some((n) => o?.input?.includes(`"account":"${n}"`))) untrustedReads++; return b4(f, a, o); };
+  const phase = async (label: string, opts: { keepLegacy?: boolean; interactive?: boolean }) => {
+    const before = untrustedReads; let err = ''; let r: Awaited<ReturnType<MacKeychainStore['prepare']>> | null = null;
+    try { r = await storeFor(kc, DEV2, s4, counting).prepare({ legacyNames: NAMES, notice: () => {}, ...opts }); } catch (e) { err = (e as Error).message; }
+    const reads = untrustedReads - before;
+    console.log(`      ${label}: ${reads} read(s) of the ad-hoc items (= dialogs)${r ? `; copied ${r.copied}, deleted ${r.removed}, unread ${r.unread}` : ''}${err ? `; init stops: ${err.slice(0, 110)}…` : ''}; items now ${accounts().length}`);
+    return { reads, err, r };
+  };
+  const i4 = await phase('init, bridge running (copy only)', { keepLegacy: true, interactive: true });
+  check(i4.reads === 2 && /nothing was lost/.test(i4.err), 'init: each ad-hoc item read once (refused here), the other 9 copied, nothing lost');
+  const st1 = await phase('bridge start 1', {});
+  const st2 = await phase('bridge start 2', {});
+  const st3 = await phase('bridge start 3', {});
+  check(st1.reads + st2.reads + st3.reads === 0 && st1.r?.removed === NAMES.length - 2, 'bridge starts: no read of the ad-hoc items (no dialog), the 9 copied old items deleted');
+  check(await allPresentExcept(storeFor(kc, DEV2, s4), UNTRUSTED), 'the 9 copied secrets read back from the one item; the 2 ad-hoc items are still there, untouched');
+  // deletes of items created by another build, dialogs disallowed: the access list is not consulted
+  const del = await storeFor(kc, DEV2, s4).items.delete(UNTRUSTED[0]!).then((ok) => `deleted=${ok}`, (e: Error) => `refused: ${e.message}`);
+  console.log(`      delete of an item only the ad-hoc build trusts, by Developer ID build 2, dialogs disallowed: ${del}`);
+  check(del === 'deleted=true', 'delete of an item another build created: silent (throwaway keychain)');
+  const pl = spawnSync('/usr/bin/security', ['set-generic-password-partition-list', '-S', 'cdhash:0000', '-s', SVC, '-a', UNTRUSTED[1]!, '-k', 'throwaway', kc], { encoding: 'utf8' });
+  const hasPartition = /partition/i.test(sec('dump-keychain', '-a', kc));
+  console.log(`      set-generic-password-partition-list on a throwaway keychain: exit ${pl.status}, partition entry in the access list afterwards: ${hasPartition} (a login-keychain-only behaviour; not reproducible here)`);
 
   if (process.argv.includes('--show-dialog')) {
     freshKeychain(false); await storeFor(kc, DEV1, st()).set(NAMES[0]!, 'dummy');

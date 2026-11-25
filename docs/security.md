@@ -27,7 +27,9 @@ To report a vulnerability, see [SECURITY.md](../SECURITY.md).
 - Conversation content.
 - Bridge secrets: identity keys, policy integrity key, bot tokens, webhook URLs and keys (all in one macOS Keychain
   item, `agentbridge: saved keys`, readable without a prompt only by the Developer ID-signed `AgentBridge.app`; see
-  [the presence README](../packages/presence/README.md#keychain-item-one-for-all-secrets)).
+  [the presence README](../packages/presence/README.md#keychain-item-one-for-all-secrets)). `run/keychain-trust.json`
+  next to the database holds no secret: the helper identity that last read the item, the secret names it holds, and
+  old items that failed to move.
 
 ## In scope
 

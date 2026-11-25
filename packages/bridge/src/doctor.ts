@@ -15,6 +15,11 @@ export interface PlatformDoctorOptions {
   launchdProgram?: () => Promise<DoctorCheck[]>;
   /** Is a manually started bridge running instead of the launchd job? */
   launchdOwner?: () => Promise<DoctorCheck | null>;
+  /**
+   * Old one-per-secret keychain items still present (attributes only: no secret read, no dialog). macOS refuses to
+   * delete some (an item whose partition list lacks this helper's team), and the bridge does not retry those.
+   */
+  keychain?: { service: string; leftovers: () => Promise<string[]> };
   /** Relay checks need the policy (URL) and the identity keys. */
   relay?: { policy: () => Policy | null; secrets: SecretStore | null; fetch?: typeof fetch; connected?: () => boolean | null };
 }
@@ -39,6 +44,15 @@ export async function platformDoctor(o: PlatformDoctorOptions): Promise<DoctorCh
   }
   if (o.launchdProgram) {
     try { out.push(...(await o.launchdProgram())); } catch (e) { out.push({ id: 'launchd_program', ok: false, detail: `launchd plist check failed: ${(e as Error).message}` }); }
+  }
+  if (o.keychain) {
+    try {
+      const left = await o.keychain.leftovers();
+      const svc = o.keychain.service;
+      out.push(left.length === 0
+        ? { id: 'keychain', ok: true, detail: 'saved keys are in one keychain item ("agentbridge: saved keys"); no old items left' }
+        : { id: 'keychain', ok: false, detail: `${left.length} old keychain item${left.length === 1 ? '' : 's'} left (${left.join(', ')}); their keys are already in "agentbridge: saved keys", and macOS refused to let AgentBridge delete them`, fix: left.map((n) => `security delete-generic-password -s ${svc} -a ${n}`).join('; ') });
+    } catch (e) { out.push({ id: 'keychain', ok: false, detail: `keychain check failed: ${(e as Error).message}` }); }
   }
   if (o.relay) {
     const pol = o.relay.policy();

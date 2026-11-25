@@ -88,7 +88,7 @@ test('move from ad-hoc items: warns first, then one dialog per old item, once; t
   fk.runner = async (file, args, opts) => { if (file === fk.helperPath && args[0] === 'keychain-get') order.push('read'); return runner(file, args, opts); };
   const s2 = new MacKeychainStore({ runner: fk.runner, helperPath: fk.helperPath, service: SVC, stateDir: dir });
   const r = await s2.prepare({ legacyNames: Object.keys(LEGACY), notice: (l) => order.push(`notice: ${l}`) });
-  assert.match(order[0]!, /^notice: AgentBridge is moving its 11 saved keys into one keychain item\. If macOS asks for your login password \(up to 11 times/);
+  assert.match(order[0]!, /^notice: AgentBridge is moving 11 saved keys into one keychain item\. If macOS asks for your login password \(up to 11 times, only during this move\)/);
   assert.equal(r.asks, 11);
   assert.equal(fk.prompts.length, 11);
   fk.prompts = [];
@@ -225,7 +225,7 @@ test('warning: when macOS is likely to ask, and not otherwise', async (t) => {
   // a different team's helper (re-trust) → one warning, one dialog
   fk.identity = OTHER_TEAM;
   c = await check(fk, dir); assert.deepEqual([c.warned, c.prompted, c.r.asks], [true, 1, 1]);
-  assert.equal(c.line, promptNotice(1, 0));
+  assert.equal(c.line, promptNotice(0, true));
   assert.match(c.line!, /^macOS may ask for your login password once so AgentBridge can read its saved keys\. Enter it and choose Always Allow\.$/);
   c = await check(fk, dir); assert.deepEqual([c.warned, c.prompted], [false, 0]);
   // ad-hoc builds: each rebuild is a new identity
@@ -238,7 +238,7 @@ test('warning: when macOS is likely to ask, and not otherwise', async (t) => {
   const s2 = store(fk2, d2, { helperIdentity: async () => null });
   const n = notices(); await s2.prepare({ legacyNames, notice: n.notice }); assert.equal(n.lines.length, 1);
   const n2 = notices(); await s2.prepare({ legacyNames, notice: n2.notice }); assert.equal(n2.lines.length, 0);
-  assert.deepEqual(JSON.parse(readFileSync(join(d2, TRUST_FILE), 'utf8')), { v: 1, services: { [SVC]: 'unknown' } });
+  assert.deepEqual(JSON.parse(readFileSync(join(d2, TRUST_FILE), 'utf8')).services, { [SVC]: 'unknown' });
 });
 
 test('purge deletes the combined item, a leftover update item and old items', async (t) => {

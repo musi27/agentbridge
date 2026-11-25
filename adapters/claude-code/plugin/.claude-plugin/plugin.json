@@ -1,6 +1,6 @@
 {
   "name": "agentbridge",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Human-approved conversations between your Claude Code sessions and other agents (e.g. your Grok Bot), through the local agentbridge bridge.",
   "author": { "name": "agentbridge" },
   "license": "MIT",
