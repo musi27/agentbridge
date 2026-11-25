@@ -22,8 +22,14 @@ jobs:
         with: { node-version: 24, cache: npm }
       - run: npm ci
       - run: npm run check
-      - name: Build the helper fresh (universal, ad-hoc signed)
-        run: rm -rf packages/presence/bin && npm run build:helper -w @agentbridge/presence
+      # The helper ships as committed: Developer ID-signed on the owner's Mac (docs/release-signing.md). CI never sees
+      # the key; it only refuses a bundle whose sources changed since the signing.
+      - name: Signed helper is valid and matches its sources
+        run: |
+          if ! npm run --silent check:signed-helper -w @agentbridge/presence; then
+            echo "::error file=packages/presence/signed/manifest.json::helper sources changed or signed bundle invalid: re-sign on your Mac (npm run sign:helper -w @agentbridge/presence, docs/releasing.md)"
+            exit 1
+          fi
       - name: Build, pack and verify the npm package
         run: npm run pack:release
       - name: Tag matches the package version

@@ -1,128 +1,123 @@
-# Release signing plan for `AgentBridge.app` (the helper)
+# Release signing for `AgentBridge.app` (the helper)
 
-Status: **plan only**. Nothing is signed yet. Builds, including releases, are ad-hoc signed by
-`packages/presence/native/build.sh`.
+Releases ship `AgentBridge.app` (`live.musi.agentbridge`, `LSUIElement`), the presence and keychain helper, signed
+with the project's **Developer ID Application** certificate (Team ID `67B9AY2VHJ`). Dev builds and tests keep an
+ad-hoc signed copy. This page describes what is built, why, and the one-time keychain prompts the switch causes.
+For the steps of a release, see [releasing.md](releasing.md#re-signing-the-helper).
 
-Since TODO item 15 the helper is the executable of a background app bundle,
-`bin/AgentBridge.app` (`live.musi.agentbridge`, `LSUIElement`), so the Touch ID and keychain
-dialogs say "AgentBridge" and show its icon. Before that it was a bare `bin/agentbridge-helper`
-with the identifier `live.musi.agentbridge.helper`. The steps below are for the bundle.
+## How it works
 
-## What a release build needs
+- **The key stays on the owner's Mac.** The certificate and its private key live in the owner's login keychain and
+  are never exported, copied into CI or committed. It is a certificate used only for agentbridge, so revoking it never
+  affects another app, and the other way round.
+- **The owner signs locally**: `npm run sign:helper -w @agentbridge/presence`
+  ([`packages/presence/scripts/sign-helper.ts`](../packages/presence/scripts/sign-helper.ts)). It
+  1. finds the "Developer ID Application" identity of team `67B9AY2VHJ` in the keychain and refers to it by its
+     SHA-1 (the certificate's name is never typed or printed);
+  2. builds the universal bundle with `native/build.sh --out <tmp> --identity <sha1>`: the same build as dev, signed
+     with `codesign --force --options runtime --timestamp --identifier live.musi.agentbridge`;
+  3. checks the new signature (below), then replaces
+     [`packages/presence/signed/AgentBridge.app`](../packages/presence/signed) and writes
+     `signed/manifest.json`: the SHA-256 of each helper source (`native/main.swift`, `native/Info.plist`,
+     `native/AppIcon.icns`, `native/build.sh`) and of all of them together, the bundle's cdhash per architecture,
+     the Team ID, the identifier, the `swiftc` version and the signing time.
+- **The signed bundle is committed.** `.gitattributes` marks it `binary`, so git never converts the line endings of
+  the sealed `Info.plist`. Git keeps the bytes and the executable bit, which is all the signature needs.
+- **Release CI packs it as is** and never sees the key. `npm run check:signed-helper -w @agentbridge/presence` (a step
+  in [release.yml](../.github/workflows/release.yml)) and `packaging/npm/scripts/build.ts` both refuse a bundle that
+  fails the signature checks, doesn't match its manifest, or was signed from older sources: "helper sources changed
+  (…): re-sign on your Mac".
+- **Signature checks** (`checkSignature` in
+  [`signed-helper.ts`](../packages/presence/scripts/signed-helper.ts)), run on the committed bundle by a test in
+  `npm run check`, before packing, and on the installed package by `packaging/npm/scripts/verify.ts`:
+  - `codesign --verify --strict` passes (the seal over the executable, `Info.plist` and icon is intact);
+  - not ad hoc, `TeamIdentifier=67B9AY2VHJ`, `Identifier=live.musi.agentbridge`;
+  - hardened runtime flag and a secure timestamp;
+  - it satisfies `anchor apple generic and identifier "live.musi.agentbridge" and certificate
+    leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "67B9AY2VHJ"` (an Apple-issued
+    Developer ID Application certificate of our team);
+  - its **designated requirement** is `anchor apple generic` + that identifier + that team. This is what the keychain
+    stores in each item's ACL, so it is what makes later updates silent.
+- **Which bundle runs.** The runtime always runs `<package>/bin/AgentBridge.app/Contents/MacOS/AgentBridge`
+  (`DEFAULT_HELPER_PATH`). In the npm package, `bin/` holds the signed bundle copied from `signed/`. In a checkout,
+  `packages/presence/bin/` holds the ad-hoc build from `native/build.sh`, which tests build on demand, so contributors
+  without the key can run `npm run check`.
+- **No entitlements.** LocalAuthentication and the legacy login keychain work under the hardened runtime without any.
+  Don't add `keychain-access-groups`: that would move items to the data-protection keychain, which needs a
+  provisioning profile.
 
-1. **Apple Developer Program membership** (individual or organisation) and a **Developer ID
-   Application** certificate in the release machine's keychain, or in CI as a base64 `.p12` secret
-   imported into a temporary keychain.
-2. **Build** the bundle exactly as `build.sh` does (`swiftc -O`, arm64 + x86_64,
-   `lipo -create`, the fixed `native/Info.plist` and `native/AppIcon.icns`). Pin the Xcode version
-   in CI so builds stay comparable.
-3. **Sign** the bundle with hardened runtime and a secure timestamp, keeping the stable identifier
-   (it has a single executable and no nested code, so one `codesign` covers it):
-   ```bash
-   codesign --force --options runtime --timestamp \
-     --identifier live.musi.agentbridge \
-     --sign "Developer ID Application: <Name> (<TEAMID>)" bin/AgentBridge.app
-   ```
-   No entitlements are needed. LocalAuthentication and the legacy login keychain both work under
-   the hardened runtime without entitlements. Do not add `keychain-access-groups`: that would move
-   items to the data-protection keychain, which needs a provisioning profile.
-4. **Notarise** a zip of the bundle with `notarytool`:
-   ```bash
-   ditto -c -k --keepParent bin/AgentBridge.app helper.zip
-   xcrun notarytool submit helper.zip --keychain-profile agentbridge-notary --wait
-   xcrun notarytool log <submission-id> --keychain-profile agentbridge-notary   # on failure
-   ```
-   The credentials are an App Store Connect API key (preferred for CI) or an app-specific
-   password, stored with `notarytool store-credentials`.
-5. **Staple:** `xcrun stapler staple bin/AgentBridge.app`, then `xcrun stapler validate`.
-   Gatekeeper then passes offline even if the bundle is quarantined. (The old bare helper could
-   not be stapled.)
-6. **Verify** before publishing:
-   ```bash
-   codesign --verify --strict --verbose=2 bin/AgentBridge.app
-   codesign -dv bin/AgentBridge.app 2>&1 | grep -E 'Identifier|TeamIdentifier|flags=.*runtime'
-   spctl --assess --type execute -vv bin/AgentBridge.app   # "source=Notarized Developer ID"
-   ```
-7. **Publish:** the signed bundle goes into the npm tarball (`files` includes `bin/`). Record its
-   SHA-256 in the release notes, and have `agentbridge doctor` compare against it.
+Changing the helper sources therefore means a re-sign before the next release. Contributors can change them freely;
+`npm run check` only notes that the signed bundle is out of date, and the release refuses to pack until the owner
+re-signs.
 
-## Quarantine: is an npm-installed binary affected?
+## Why Developer ID: the keychain
 
-- Gatekeeper only assesses files that carry the `com.apple.quarantine` extended attribute. A
-  browser, Mail, AirDrop and most GUI download tools set it.
-- **`npm install` does not set it.** npm fetches tarballs with Node's HTTP stack and extracts them
-  itself, and Node does not add quarantine attributes. So an npm-installed helper runs whether or
-  not it is notarised. (Spot-check on each release: `xattr -l` on the installed binary should
-  show no `com.apple.quarantine`.)
-- It **is** quarantined if a user downloads the tarball or binary with a browser, or installs
-  through a tool that propagates quarantine. Unsigned or un-notarised, it is then blocked
-  ("cannot be opened because the developer cannot be verified"). Notarised, it runs.
-- Apple Silicon requires every binary to be signed at least ad-hoc. Our build always signs, and
-  npm leaves the signature intact.
+Items in the legacy login keychain trust the creating program's **designated requirement**:
 
-So for the npm path, notarisation guards the less common install routes. **Developer ID signing
-is the part that matters most, because of the keychain**, not Gatekeeper:
+- **Ad hoc**: the requirement is the cdhash only (the identifier is not part of it). Every change to the bundle's
+  code, `Info.plist` or icon makes macOS ask "AgentBridge wants to use your confidential information stored in
+  "agentbridge" in your keychain" once per item. Upgrading to 0.2.5 (the first `AgentBridge.app`) showed about 7.
+- **Developer ID**: the requirement is Apple anchor + identifier + Team ID, so any later build signed by the same team
+  with the same identifier reads silently, whatever its code.
 
-- **Keychain ACLs:** items in the legacy login keychain trust the creating binary's *designated
-  requirement*. Ad-hoc: DR = cdhash only (the identifier is not part of it), so every change to
-  the bundle's code, Info.plist or icon makes macOS ask "AgentBridge wants to use your
-  confidential information…" for each item on first access. Developer ID: DR =
-  identifier + Team ID, so updates keep access silently.
-- **TCC / user trust:** a stable signed identity keeps any future permission (for example
-  notifications from a bundled app) tied to one identity across updates.
+The same holds for user permissions tied to the app's identity (TCC), such as notifications from the planned agent
+panel: with Developer ID they survive updates.
 
-## Moving from ad-hoc to Developer ID re-prompts once
+## Moving from ad hoc to Developer ID: one prompt per item, once
 
-Existing keychain items created by the ad-hoc helper trust that binary's cdhash. The first
-Developer ID-signed helper is a different identity, so macOS asks once per item ("… wants to use
-your confidential information stored in 'agentbridge'"). To avoid that:
+Items saved by an ad-hoc helper trust that build's cdhash. The first Developer ID helper is a different identity, so
+macOS asks once per item: the identity keys, the policy key, version and snapshot, and three per Grok bot (about 7 on
+a Mac with one bot). Enter the login password and choose **Always Allow**: the item's ACL then trusts the Developer ID
+requirement, and later releases don't ask again. No migration step was built; the prompts are documented in the
+release notes and [troubleshooting.md](troubleshooting.md#after-an-upgrade-macos-asks-to-use-the-agentbridge-keychain-items).
 
-- on upgrade, have `init` / `doctor --fix` read each secret with the old helper and rewrite it
-  with the new one; `keychain-set` is delete-then-add, so the new item trusts the signed identity;
-- or document "choose Always Allow" for the one-time prompts.
+For the release notes of the first signed release:
 
-After that, Developer ID updates keep the same designated requirement (identifier + Team ID) and
-don't prompt again.
+> **One last round of keychain prompts.** The Touch ID and keychain helper (`AgentBridge.app`) is now signed with the
+> project's Apple Developer ID. The first time it reads each saved secret, macOS asks "AgentBridge wants to use your
+> confidential information stored in "agentbridge" in your keychain", once per item (about 7). Enter your login
+> password and choose **Always Allow**. Future updates keep that access without asking.
 
-## Ad-hoc `AgentBridge.app` and the keychain (checked 2026-11-25)
+### Throwaway-keychain test
 
-Tested with a throwaway keychain file and a test program making the helper's calls:
+Checked 2026-11-25 on macOS 26 (Apple Silicon) with a throwaway keychain file, never the login keychain. A probe
+program made the helper's keychain calls (`SecItemAdd` with the default access list, which trusts the creating app;
+`SecItemCopyMatching`) against that file. It was built into a bundle with the real `Info.plist` and icon and signed
+three ways. "No UI" means `SecKeychainSetUserInteractionAllowed(false)`: a read that would show a dialog fails instead.
 
-- An item created by an ad-hoc binary is read silently by the **same cdhash** at another path or
-  under another file name, and by an identical rebuild.
-- The same code inside an app bundle, **with the old identifier or the new one**, has a different
-  cdhash, and macOS shows "AgentBridge wants to use your confidential information stored in …".
-  Keeping `live.musi.agentbridge.helper` would not have avoided the prompt, so the bundle uses its
-  bundle id as the identifier.
+| Step | Build | Result |
+|---|---|---|
+| A | ad hoc, probe v1 | creates the item, reads it silently |
+| B0 | Developer ID, probe v1 (new cdhash), no UI | refused: **would prompt** |
+| C0 | Developer ID, probe v2, no UI, before B | refused: would prompt |
+| B | Developer ID, probe v1, UI allowed | **one dialog** ("AgentBridge wants to use your confidential information…"); Always Allow → reads |
+| B1 | Developer ID, probe v1 again, no UI | reads silently |
+| C | Developer ID, **probe v2 (different code, different cdhash)**, no UI | **reads silently** |
+| D | ad hoc, probe v2 (control), no UI | refused: would prompt |
 
-So the first release with `AgentBridge.app` prompts once per keychain item (identity keys, policy
-key/version/snapshot, three per Grok bot). Enter the login password and choose **Always Allow**.
-There were no other users to migrate, so no rewrite step was built. Later releases prompt again
-only if the bundle's cdhash changes: `native/Info.plist` is a fixed file (no version stamped in)
-for that reason, and the Swift build is deterministic for a given toolchain, but a new Xcode on
-the `macos-latest` release runner can change it.
+After step B the item's access list holds two entries: the ad hoc build's `cdhash H"…"`, and the Developer ID
+build's designated requirement, `identifier "live.musi.agentbridge" and anchor apple generic and … certificate
+leaf[subject.OU] = "67B9AY2VHJ"`. Any later build from the same team and identifier satisfies the second entry. So
+the move costs one prompt per item, and Developer ID updates after that cost none. Ad hoc builds (such as a
+from-source `build.sh` build) still prompt.
 
-- **Permissions:** notification permission (when the app posts notifications,
-  docs/notifications.md) is tied to the bundle id and signature, so it has the same weakness
-  under ad-hoc signing. Developer ID fixes both (TODO item 10).
+## Notarisation: not now
 
-## Fallback if the release is unsigned
+The helper is not notarised. Gatekeeper only assesses files carrying the `com.apple.quarantine` attribute, which
+browsers, Mail and AirDrop set, and **`npm install` does not** (Node fetches and extracts the tarball itself).
+`verify.ts` checks the installed helper has no quarantine attribute. A browser-downloaded copy of the tarball would be
+quarantined and blocked until notarised.
 
-If there is no Developer ID at release time:
+**A standalone distribution (a DMG or zip of the app, for example for the agent panel) would need notarisation**:
+`ditto -c -k --keepParent AgentBridge.app helper.zip`, `xcrun notarytool submit helper.zip --keychain-profile <profile>
+--wait`, then `xcrun stapler staple AgentBridge.app`, and `spctl --assess --type execute -vv` should say
+"source=Notarized Developer ID". The hardened runtime and secure timestamp it requires are already in place.
 
-1. Ship the ad-hoc-signed bundle (as built by `build.sh`), or let `npm install` build it from
-   source when Xcode Command Line Tools are present (`build.sh` fails with a clear message when
-   `swiftc` is missing).
-2. Document the consequences in the README:
-   - a keychain access prompt for each secret after every helper update (choose "Always Allow")
-   - a Gatekeeper block if the binary was downloaded via a browser; fix with
-     `xattr -d com.apple.quarantine <path>` after the user has checked the SHA-256
-3. `doctor` reports "helper: ad-hoc signed (development)" so the state is visible.
-4. The presence check itself is unaffected. M0 V5 and the M1 launchd probe both ran ad-hoc
-   binaries successfully.
+## History: ad-hoc `AgentBridge.app` and the keychain (checked 2026-11-25)
 
-## CI sketch (later)
+Tested with a throwaway keychain file before Developer ID (TODO item 15):
 
-macOS job on tag push: import cert into a temp keychain → `build.sh` → `codesign` (above) →
-`notarytool submit --wait` with an App Store Connect API key from secrets → verify → `npm publish`.
-Signing secrets live only in a protected release environment, never in PR jobs.
+- An item created by an ad-hoc binary is read silently by the **same cdhash** at another path or under another file
+  name, and by an identical rebuild.
+- The same code inside an app bundle, **with the old identifier or the new one**, has a different cdhash, and macOS
+  prompts. So the bundle uses its bundle id as the identifier, which the Developer ID signature keeps.

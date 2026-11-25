@@ -9,6 +9,8 @@
   "files": ["dist", "bin", "native"],
   "scripts": {
     "build:helper": "native/build.sh",
+    "sign:helper": "node scripts/sign-helper.ts",
+    "check:signed-helper": "node scripts/sign-helper.ts --check",
     "launchd-probe": "node scripts/launchd-probe.ts"
   },
   "dependencies": { "@agentbridge/protocol": "0.4.0" }

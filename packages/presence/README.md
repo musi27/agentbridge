@@ -39,15 +39,16 @@ Package exports carry the repo-wide `agentbridge-source` condition, which points
 
 ## The native helper: `AgentBridge.app`
 
-`native/build.sh` builds `bin/AgentBridge.app`, a background app bundle:
+`native/build.sh` builds `bin/AgentBridge.app`, a background app bundle (dev and tests use this
+ad-hoc signed build; releases ship the Developer ID-signed copy in `signed/`, see below):
 
 - `Contents/MacOS/AgentBridge`: `native/main.swift` as one universal (arm64 + x86_64) binary
 - `Contents/Info.plist`: copied from `native/Info.plist`. Bundle id `live.musi.agentbridge`, name
   "AgentBridge", `LSUIElement` (no Dock icon, no menu bar). It is a fixed file with no version
-  stamped in, so the ad-hoc cdhash only changes when the code, plist or icon does.
+  stamped in, so the build's bytes only change when the code, plist or icon does.
 - `Contents/Resources/AppIcon.icns`: the icon (direction "08 The gap", graphite)
 
-The whole bundle is ad-hoc signed with the identifier `live.musi.agentbridge`. Because the
+The dev bundle is ad-hoc signed with the identifier `live.musi.agentbridge`. Because the
 executable runs from inside the bundle, macOS dialogs name it **"AgentBridge"** and show its icon:
 "AgentBridge is trying to ⟨reason⟩." The bridge always runs it by its full path
 (`DEFAULT_HELPER_PATH`); it is never opened with `open` or LaunchServices. Later the same bundle is
@@ -121,13 +122,15 @@ trusting itself) cannot capture the secret. This is tested by pre-seeding a fore
 `security add-generic-password`. The cost: the write is not atomic. A crash between delete and
 add loses the old value.
 
-The item ACL trusts the binary that created it. With an
-ad-hoc signature, that identity is the bundle's cdhash (the identifier is not part of it), so
+The item ACL trusts the designated requirement of the binary that created it. With an
+ad-hoc signature, that is the bundle's cdhash (the identifier is not part of it), so
 **after a change to the helper's code, Info.plist or icon, the first access to each item shows a
 macOS "AgentBridge wants to use your confidential information" prompt**. Moving from the bare
 `agentbridge-helper` into `AgentBridge.app` was one such change; a copy of the same build at
-another path is not. A Developer ID signature fixes this (see
-[docs/release-signing.md](../../docs/release-signing.md)).
+another path is not. Release builds are Developer ID-signed: their requirement is Apple anchor +
+identifier + Team ID, so updates read silently after a one-time prompt per item when moving from
+ad hoc (see [docs/release-signing.md](../../docs/release-signing.md)). The dev build in `bin/`
+is still ad hoc, so running it against your real keychain prompts.
 
 **Notifications:** title, body and subtitle are passed to `osascript` as argv items **after `--`**
 and read with `item N of argv`. The AppleScript source is a constant. Quotes, backslashes and
@@ -139,23 +142,34 @@ fine here. Control characters are
 stripped and lengths are capped. Tests round-trip hostile strings through the real `osascript`
 and compile the scripts with `osacompile`.
 
-## Building: why the binary is not committed
+## Building and signing
 
 `native/build.sh` (`npm run build:helper -w @agentbridge/presence`) takes about 6 s. Tests call it
-with `--if-missing`, so `npm run check` builds the helper on demand (CI is macOS with Xcode).
-`bin/` is gitignored. The binary is small (≈ 200 KB universal) and deterministic for a given
-toolchain (two builds gave the same SHA-1), but it is not committed because:
+with `--if-missing`, so `npm run check` builds the ad-hoc dev helper on demand into `bin/`, which
+is gitignored. No key is needed for anything in `npm run check`.
 
-1. It is reproducible only with an identical Swift toolchain. Every contributor's rebuild would
-   churn a binary in git history.
-2. The committed ad-hoc binary would not be the shipped artefact. Release binaries must be
-   re-signed with Developer ID and notarised (docs/release-signing.md).
-3. A committed binary that handles Touch ID and the keychain is opaque to review. Building from
-   the 150-line Swift source keeps what runs auditable.
+Releases ship **`signed/AgentBridge.app`, which is committed**: the same build, signed by the owner
+on their Mac with the project's Developer ID Application certificate (Team ID `67B9AY2VHJ`,
+hardened runtime, secure timestamp), with `signed/manifest.json` recording the hashes of the
+sources it was built from:
 
-End users never need Swift. The npm release tarball ships a prebuilt, ad-hoc signed
-`bin/AgentBridge.app` (`files` includes `bin`); Developer ID signing and notarisation come later
-(TODO item 10).
+```bash
+npm run sign:helper -w @agentbridge/presence          # owner only: build, sign, replace signed/
+npm run check:signed-helper -w @agentbridge/presence  # anyone: check signed/ (no key needed)
+```
+
+The key never leaves the owner's keychain and CI never signs. Release packing copies `signed/`
+as is and refuses it if `native/main.swift`, `Info.plist`, `AppIcon.icns` or `build.sh` changed
+since the signing. So a change to the helper sources needs a re-sign before the next release
+([docs/releasing.md](../../docs/releasing.md#re-signing-the-helper)). `npm run check` only prints
+a diagnostic for that, so contributors can still change the helper.
+
+Committing the signed bundle trades some reviewability (a binary in git) for keeping the key off
+CI. The Swift source stays the reference: anyone can rebuild it with `build.sh` and compare its
+behaviour, and the manifest ties the binary to the source hashes it came from. The runtime always
+runs `<package>/bin/AgentBridge.app` (`DEFAULT_HELPER_PATH`): the signed copy in the npm package,
+the ad-hoc build in a checkout. Notarisation is not done (npm installs aren't quarantined); a
+standalone download would need it ([docs/release-signing.md](../../docs/release-signing.md)).
 
 ## Tests
 
@@ -164,6 +178,8 @@ End users never need Swift. The npm release tarball ships a prebuilt, ad-hoc sig
 - error-code mapping, request/response parsing
 - presence checker against a stub helper (argv/stdin/env assertions, timeout, crash, serialisation)
 - real-helper protocol errors, universal-arch check
+- the committed `signed/AgentBridge.app`: Developer ID signature of team `67B9AY2VHJ`, hardened
+  runtime, timestamp, designated requirement, manifest match (a source change is a diagnostic only)
 - plist generation (`plutil`)
 - AppleScript argv safety
 - keychain store against the real login keychain under a unique throwaway service, always cleaned

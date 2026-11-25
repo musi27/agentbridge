@@ -1,1 +1,3 @@
 adapters/claude-code/plugin/runtime/*.mjs linguist-generated=true -diff
+# Developer ID-signed helper: its seal covers every byte (Info.plist included), so never convert line endings.
+packages/presence/signed/AgentBridge.app/** binary

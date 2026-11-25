@@ -7,6 +7,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } 
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkSignature } from '../../../packages/presence/scripts/signed-helper.ts';
 
 export interface VerifyResult { ok: boolean; checks: Array<{ id: string; ok: boolean; detail: string }> }
 
@@ -57,11 +58,11 @@ export function verifyTarball(tgz: string): VerifyResult {
       add('app_icon', existsSync(icon) && /icon/i.test(iconType), `${icon.slice(app.length + 1)}: ${iconType || 'missing'}`);
       const archs = spawnSync('lipo', ['-archs', helper], { encoding: 'utf8' }).stdout.trim();
       add('helper_universal', archs.includes('arm64') && archs.includes('x86_64'), `architectures: ${archs}`);
-      // --strict over the bundle: the seal (Info.plist, icon, executable) survived npm pack + install intact
-      const strict = spawnSync('codesign', ['--verify', '--strict', '--verbose=1', app], { encoding: 'utf8' });
-      const sig = spawnSync('codesign', ['-dv', app], { encoding: 'utf8' }).stderr;
-      add('helper_adhoc_signed', strict.status === 0 && /Signature=adhoc/.test(sig) && /^Identifier=live\.musi\.agentbridge$/m.test(sig),
-        `${strict.status === 0 ? 'seal valid' : `seal broken: ${strict.stderr.trim()}`}; ${sig.split('\n').filter((l) => /^Identifier|^Signature/.test(l)).join('; ')}`);
+      // the installed bundle's Developer ID signature: seal intact after npm pack + install (--strict), not ad hoc,
+      // hardened runtime, secure timestamp, designated requirement = anchor apple generic + team + identifier
+      for (const c of checkSignature(app)) add(`helper_${c.id}`, c.ok, c.detail);
+      const xattr = spawnSync('xattr', ['-l', helper], { encoding: 'utf8' }).stdout;
+      add('helper_not_quarantined', !xattr.includes('com.apple.quarantine'), 'npm install sets no com.apple.quarantine (so no notarisation needed for this route)');
     }
 
     // `agentbridge start` from the installed package: detached serve in a temp home (file secrets, never the keychain);

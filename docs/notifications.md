@@ -45,7 +45,8 @@ in `gui/501`: ppid 1, no TTY, `XPC_SERVICE_NAME = live.musi.agentbridge.probe`.
 ## Proposal: `AgentBridge.app`, a small background app bundle
 
 **Status:** the bundle exists (TODO item 15): `bin/AgentBridge.app` in the npm package, built by
-`packages/presence/native/build.sh`, ad-hoc signed, hosting the presence and keychain helper.
+`packages/presence/native/build.sh`, hosting the presence and keychain helper. Releases ship it
+Developer ID-signed (TODO item 10, [release-signing.md](release-signing.md)); dev builds are ad-hoc.
 Notifications below are not built yet; osascript is still the notifier.
 
 A minimal `LSUIElement` app (no Dock icon, no menu bar) that replaces osascript and, ideally,
@@ -83,13 +84,14 @@ also hosts the presence and keychain helper.
   bundles work for development, but authorisation and keychain trust reset whenever the cdhash
   changes.
 - Release: sign the whole bundle with **Developer ID Application**, hardened runtime, secure
-  timestamp (inside-out, or `codesign --deep` only for a single-executable bundle). Notarise a zip
+  timestamp (done since TODO item 10 for the single-executable bundle; nested code would be signed
+  inside-out). For a standalone download (not npm), notarise a zip
   of the `.app` with `notarytool`. **Staple** the ticket to the `.app` (`xcrun stapler staple
   AgentBridge.app`). Unlike the bare helper, a bundle can be stapled, so Gatekeeper checks pass
   offline.
 - Moving from the ad-hoc `agentbridge-helper` to the ad-hoc `AgentBridge.app` changed the
   keychain-trusted identity: existing items prompt once per item ("AgentBridge wants to use…").
-  Moving to a Developer ID signature will do it once more. keychain-set's delete-then-add re-creates
+  Moving to a Developer ID signature does it once more, and then no more on updates. keychain-set's delete-then-add re-creates
   an item with the new identity whenever a secret is rewritten. Details: release-signing.md.
 - No entitlements are needed (no sandbox; LocalAuthentication, legacy keychain and notifications
   all work without them).

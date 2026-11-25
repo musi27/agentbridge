@@ -217,13 +217,20 @@ Messages held at the relay expire after 7 days. If any expire, both you (notific
 **Symptom.** After `npm install -g @musi27/agentbridge` and `agentbridge init`, macOS shows one or more dialogs:
 "AgentBridge wants to use your confidential information stored in "agentbridge" in your keychain."
 
-**Cause.** The helper (`AgentBridge.app`) is ad-hoc signed, without an Apple Developer ID. The keychain trusts the
-exact build that saved each item, so a release that changes the helper's code asks once per item: the identity keys,
-the policy key, version and snapshot, and three items per Grok bot. The first release with `AgentBridge.app` is
-one of those.
+**Cause.** The keychain lets an item be read silently only by the program identity that saved it. Up to 0.2.5 the
+helper (`AgentBridge.app`) was ad-hoc signed, so that identity was the exact build, and every release that changed
+the helper asked once per item: the identity keys, the policy key, version and snapshot, and three items per Grok bot
+(about 7 with one bot). The helper is now signed with the project's Apple Developer ID, so the identity is "this
+team's AgentBridge", which later releases keep. **The first signed release asks one last time** for each item saved
+by an ad-hoc build. After that, updates don't ask.
 
 **Fix.** Enter your login password and choose **Always Allow** in each dialog. **Deny** makes that read fail, so the
 command or the bridge stops with a keychain error. Run it again (`agentbridge init` restarts the bridge) and allow it.
+
+If a signed release keeps asking on every update, check the installed helper's signature:
+`codesign -dv "$(npm root -g)/@musi27/agentbridge/bin/AgentBridge.app" 2>&1 | grep -E 'TeamIdentifier|Signature'`
+should show `TeamIdentifier=67B9AY2VHJ` and no `Signature=adhoc`. A helper built from source (`npm run build:helper`)
+is ad-hoc signed and behaves like the old releases.
 
 ## Touch ID is unavailable
 
