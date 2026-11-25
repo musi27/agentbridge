@@ -9,19 +9,38 @@ here="$(cd "$(dirname "$0")" && pwd)"
 pkg="$(dirname "$here")"
 app="$pkg/bin/AgentBridge.app"
 exe="$app/Contents/MacOS/AgentBridge"
-if [ "${1:-}" = "--if-missing" ] && [ -x "$exe" ] \
-  && [ "$exe" -nt "$here/main.swift" ] && [ "$exe" -nt "$here/Info.plist" ] && [ "$exe" -nt "$here/AppIcon.icns" ] && [ "$exe" -nt "$0" ]; then
-  exit 0
-fi
+fresh() {
+  [ "${1:-}" = "--if-missing" ] && [ -x "$exe" ] \
+    && [ "$exe" -nt "$here/main.swift" ] && [ "$exe" -nt "$here/Info.plist" ] && [ "$exe" -nt "$here/AppIcon.icns" ] && [ "$here/build.sh" -ot "$exe" ]
+}
+if fresh "$@"; then exit 0; fi
 if [ "$(uname -s)" != "Darwin" ]; then
   echo "AgentBridge.app: macOS only; skipping build" >&2
   exit 0
 fi
 command -v swiftc >/dev/null 2>&1 || { echo "AgentBridge.app: swiftc not found (install Xcode Command Line Tools: xcode-select --install)" >&2; exit 1; }
 
+# One build at a time: test files run in parallel and each may call this with --if-missing. Two builds
+# racing the final rm + mv would nest one bundle inside the other ("unsealed contents present in the
+# bundle root"). mkdir is atomic, so it serves as the lock.
+mkdir -p "$pkg/bin"
+lock="$pkg/bin/.build.lock"
+tmp=""
+waited=0
+until mkdir "$lock" 2>/dev/null; do
+  if [ "$waited" -ge 600 ]; then
+    echo "AgentBridge.app: another build has held $lock for 10 minutes; if none is running, remove it and retry" >&2
+    exit 1
+  fi
+  sleep 1
+  waited=$((waited + 1))
+done
+trap 'rm -rf "$tmp"; rmdir "$lock" 2>/dev/null || true' EXIT
+# A build that held the lock before us may have just produced a fresh bundle.
+if fresh "$@"; then exit 0; fi
+
 min_macos="13.0"
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
 for arch in arm64 x86_64; do
   swiftc -O -whole-module-optimization \
     -target "$arch-apple-macosx$min_macos" \
@@ -39,7 +58,6 @@ plutil -lint -s "$b/Contents/Info.plist"
 # Identifier = the bundle id, so a later Developer ID signature refers to the same name.
 codesign --force --sign - --identifier live.musi.agentbridge "$b"
 codesign --verify --strict "$b"
-mkdir -p "$pkg/bin"
 rm -rf "$app" "$pkg/bin/agentbridge-helper"
 mv "$b" "$app"
 echo "built $app ($(lipo -archs "$exe"), $(wc -c < "$exe" | tr -d ' ') bytes)" >&2
