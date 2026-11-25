@@ -105,14 +105,27 @@ export class LaunchdServiceManager implements ServiceManager {
 
   async install(opts: { nodePath: string; entry: string; logDir: string }): Promise<void> {
     for (const [k, v] of Object.entries(opts)) if (!isAbsolute(v)) throw new TypeError(`${k} must be an absolute path: ${v}`);
+    await this.installProgram({
+      programArguments: [opts.nodePath, opts.entry], logDir: opts.logDir, logName: 'bridge',
+      // launchd's default PATH is minimal; make it explicit, with node's own directory first.
+      environment: { PATH: `${dirname(opts.nodePath)}:/usr/bin:/bin:/usr/sbin:/sbin`, [LAUNCHD_ENV_FLAG]: '1', ...this.#opts.environment },
+    });
+  }
+
+  /**
+   * Writes the plist for any program (RunAtLoad + KeepAlive on crash, logs `<logDir>/<logName>.{out,err}.log`) and
+   * (re)loads it. `install` (the bridge) and the agent panel's login item both use it.
+   */
+  async installProgram(opts: { programArguments: readonly string[]; logDir: string; logName: string; environment?: Readonly<Record<string, string>> }): Promise<void> {
+    if (!isAbsolute(opts.logDir)) throw new TypeError(`logDir must be an absolute path: ${opts.logDir}`);
+    if (!/^[a-z][a-z0-9-]*$/.test(opts.logName)) throw new TypeError(`invalid log name: ${opts.logName}`);
     await mkdir(opts.logDir, { recursive: true, mode: 0o700 });
     const plist = renderPlist({
       label: this.label,
-      programArguments: [opts.nodePath, opts.entry],
-      stdoutPath: join(opts.logDir, 'bridge.out.log'),
-      stderrPath: join(opts.logDir, 'bridge.err.log'),
-      // launchd's default PATH is minimal; make it explicit, with node's own directory first.
-      environment: { PATH: `${dirname(opts.nodePath)}:/usr/bin:/bin:/usr/sbin:/sbin`, [LAUNCHD_ENV_FLAG]: '1', ...this.#opts.environment },
+      programArguments: opts.programArguments,
+      stdoutPath: join(opts.logDir, `${opts.logName}.out.log`),
+      stderrPath: join(opts.logDir, `${opts.logName}.err.log`),
+      ...(opts.environment ? { environment: opts.environment } : {}),
     });
     const dir = join(this.plistPath, '..');
     await mkdir(dir, { recursive: true });
@@ -133,7 +146,12 @@ export class LaunchdServiceManager implements ServiceManager {
     throw new Error(`launchctl bootstrap ${this.#domain} ${this.plistPath} failed: ${last}`);
   }
 
-  async uninstall(): Promise<void> {
+  /**
+   * bootout + delete the plist. `fileFirst` deletes the plist before the bootout: for a job that asks to remove
+   * itself (the panel's "Turn off"), whose own process tree the bootout ends, so nothing is left to load at login.
+   */
+  async uninstall(opts: { fileFirst?: boolean } = {}): Promise<void> {
+    if (opts.fileFirst) { await rm(this.plistPath, { force: true }); await this.#bootout(); return; }
     await this.#bootout();
     await rm(this.plistPath, { force: true });
   }

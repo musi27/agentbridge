@@ -19,7 +19,7 @@ export const SIGNED_APP = join(SIGNED_DIR, 'AgentBridge.app');
 export const MANIFEST = join(SIGNED_DIR, 'manifest.json');
 
 /** Everything the bundle is built from. A change to any of these means the committed bundle is stale. */
-export const SOURCE_FILES = ['native/main.swift', 'native/Info.plist', 'native/AppIcon.icns', 'native/build.sh'] as const;
+export const SOURCE_FILES = ['native/main.swift', 'native/PanelModel.swift', 'native/PanelApp.swift', 'native/Info.plist', 'native/AppIcon.icns', 'native/build.sh'] as const;
 
 /**
  * What the signature must satisfy: Apple-anchored Developer ID Application certificate (OID ...6.1.13) of our team,

@@ -1,6 +1,6 @@
 # @agentbridge/relay
 
-The relay between a user's Grok Bot (MCP connector, in the cloud) and their local bridge (WebSocket), per SPEC v0.4 §13.
+The relay between a user's Grok Bot (MCP connector, in the cloud) and their local bridge (WebSocket), per SPEC §13.
 Also exports the bridge-side client at `@agentbridge/relay/client`.
 
 ## Routes

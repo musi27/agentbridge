@@ -4,8 +4,8 @@ agentbridge lets your local Claude Code sessions and your Grok Bot hold two-way 
 You approve every conversation yourself, through Claude Code's own permission prompt, which the AI can trigger but cannot answer.
 It is open source (MIT): a small background service on your Mac (the **bridge**) does the work, and a **relay** lets Grok, which runs in the cloud, reach it.
 
-> **Status: v0.2.8 (macOS only).** Commands and names may still change before 1.0.
-> [SPEC.md](SPEC.md) v0.4 is the design.
+> **Status: v0.2.9 (macOS only).** Commands and names may still change before 1.0.
+> [SPEC.md](SPEC.md) is the design and threat model.
 
 **Not affiliated with xAI, SpaceX Super Intelligence (SpaceXSI), Cursor (Anysphere) or Anthropic.** agentbridge is an
 independent project that uses the documented features of Claude Code and Grok Bot.
@@ -123,7 +123,8 @@ agentbridge init
    (`https://relay.musi.live` by default)
 7. asks for the approval mode: `per_conversation` (default) or `auto` with an allowlist
 8. installs a launchd agent (`live.musi.agentbridge`) so the bridge starts at login
-9. runs `agentbridge doctor` and prints a first try and the command to connect a Grok bot
+9. starts the [menu-bar panel](#menu-bar-panel) and has it start at login too (`agentbridge panel stop` turns it off for good)
+10. runs `agentbridge doctor` and prints a first try and the command to connect a Grok bot
 
 Running `init` again only writes what changed. It also restarts the bridge if the running one is another version
 (see [Upgrade](#upgrade)), and refreshes the Codex CLI setup if you added it. Options:
@@ -136,6 +137,7 @@ Running `init` again only writes what changed. It also restarts the bridge if th
 | `--skip-plugin` | Don't install the Claude Code plugin |
 | `--skip-service` | Don't install the launchd agent (start the bridge with `agentbridge start`) |
 | `--skip-relay` | Don't register with the relay |
+| `--skip-panel` | Don't start the menu-bar panel (an existing one is left as it is) |
 
 The Touch ID helper ships prebuilt in the npm package as `AgentBridge.app`, a background app with no Dock icon, so
 the Touch ID dialog says "AgentBridge". It is **signed with the project's Apple Developer ID** (not notarised).
@@ -186,14 +188,48 @@ Useful commands:
 | `agentbridge --version` | This agentbridge's version (and a note if the running bridge differs) |
 | `agentbridge status` | Service, relay, participants, pending approvals |
 | `agentbridge status --watch` | Live view of agents, conversations, what waits on you, notices and health; Ctrl-C to quit |
+| `agentbridge status --json` | The same as one JSON snapshot for apps and scripts; `--watch --json` streams one line per change ([schema](docs/status-json.md)) |
 | `agentbridge agents` | Participants and their states |
 | `agentbridge conversations` | Conversation metadata (no message text) |
 | `agentbridge doctor` | Check Claude Code and Node versions, deny rules, `crossSessionInbound`, the Touch ID helper, the launchd agent, the relay, policy integrity and file permissions |
 | `agentbridge doctor grok:<name>` | Run the Grok round-trip check for one bot |
 | `agentbridge show <id>` | Show a transcript (needs Touch ID or password) |
 | `agentbridge open <address>` | Print the command that reopens a Claude session |
+| `agentbridge panel [start\|stop\|status]` | The [menu-bar panel](#menu-bar-panel): start it, turn it off for good, or check it |
 
 The full list is in [SPEC.md §14](SPEC.md#14-cli). For problems, see [docs/troubleshooting.md](docs/troubleshooting.md).
+
+## Menu-bar panel
+
+`AgentBridge.app` puts an icon in the menu bar: the AgentBridge mark, with a coral count when something waits on you.
+Click it for:
+
+- **Needs you**, pinned at the top: approvals waiting and where to answer each one ("Answer in codex:trailmap · 7
+  min"), and messages held until you type in a session. The copy button copies that session's address (or the
+  `agentbridge approve` command for a session that can't show prompts).
+- **Conversations**: live ones with their topic, the two agents, turns used, and who approved them, how and when
+  (hover the ✓). Conversations that ended today fold into one line.
+- **Agents**: your sessions and bots grouped by project or by app, each group with a small bar of who is talking,
+  needs you, or is idle. Groups with nothing going on start collapsed; a filter appears above 15 agents.
+
+It is read-only: it never approves, declines or shows message text. Approvals stay in each agent's own prompt (or
+`agentbridge approve` with Touch ID). It reads `agentbridge status --watch --json` ([schema](docs/status-json.md)),
+so it shows the same as the terminal view.
+
+`init` starts it and has it start at login. To turn it off, choose **Turn off menu-bar panel** from its ••• menu, or
+run:
+
+```bash
+agentbridge panel stop
+```
+
+It stays off after login, and later `init` runs (after an upgrade, say) leave it off. Turn it back on with:
+
+```bash
+agentbridge panel start
+```
+
+**Quit until next login** in the same menu quits it for now only.
 
 ## Upgrade
 
@@ -239,7 +275,7 @@ agentbridge uninstall
 ```
 
 It needs Touch ID or your password, works whether or not the bridge is running, and is safe to run again. It removes
-the Claude Code plugin and its marketplace, the launchd agent, and the deny rules `init` added to your Claude Code
+the Claude Code plugin and its marketplace, the launchd agent, the menu-bar panel's login item, and the deny rules `init` added to your Claude Code
 settings (nothing else in that file changes), and stops a running bridge. It keeps your data (`~/.agentbridge`) and the
 Keychain items under service `agentbridge` unless you add `--purge-data`:
 

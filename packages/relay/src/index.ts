@@ -1,4 +1,4 @@
-// @agentbridge/relay: the relay service (SPEC v0.4 §13). The bridge-side client is at @agentbridge/relay/client.
+// @agentbridge/relay: the relay service (SPEC §13). The bridge-side client is at @agentbridge/relay/client.
 export { createRelay, handleHttp, logicalPath, type Relay } from './server.ts';
 export { makeCtx, keys, type RelayConfig, type Ctx, type UserRecord, type BotRecord } from './core.ts';
 export { handleMcp, visibleTools, MCP_PROTOCOL_VERSIONS, TEXT as RELAY_TEXT } from './mcp.ts';

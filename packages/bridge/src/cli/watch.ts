@@ -71,3 +71,45 @@ export async function runWatch(d: WatchDeps): Promise<number> {
   }
   return 0;
 }
+
+/** `status --watch --json` prints a heartbeat line when nothing changed for this long. */
+export const HEARTBEAT_MS = 15_000;
+
+export interface WatchJsonDeps {
+  fetch(): Promise<WatchStatus>;
+  /** Writes one line (no ANSI, newline included by the caller). Throwing (e.g. EPIPE) stops the stream. */
+  write(line: string): void;
+  cliVersion: string;
+  intervalMs?: number;
+  heartbeatMs?: number;
+  now?(): number;
+  /** Resolves when the stream should end: SIGINT/SIGTERM, or stdout closed (SIGPIPE/EPIPE). */
+  stopped: Promise<void>;
+  sleep?(ms: number, stopped: Promise<void>): Promise<void>;
+}
+
+/**
+ * `agentbridge status --watch --json`: one JSON object per line (docs/status-json.md). A snapshot line whenever the
+ * state changes (never two equal snapshots in a row), a heartbeat line after HEARTBEAT_MS of no change. A bridge that
+ * can't be reached is a `bridge.running: false` snapshot; the stream keeps polling and recovers when it is back.
+ */
+export async function runWatchJson(d: WatchJsonDeps): Promise<number> {
+  const { buildStatusJson, notRunning, changeKey, STATUS_SCHEMA } = await import('./status-json.ts');
+  let done = false; void d.stopped.then(() => { done = true; });
+  const sleep = d.sleep ?? ((ms: number, s: Promise<void>) => new Promise<void>((resolve) => { const t = setTimeout(resolve, ms); void s.then(() => { clearTimeout(t); resolve(); }); }));
+  const interval = d.intervalMs ?? WATCH_INTERVAL_MS; const heartbeat = d.heartbeatMs ?? HEARTBEAT_MS;
+  let lastKey: string | null = null; let lastLineAt = 0;
+  while (!done) {
+    const now = d.now?.() ?? Date.now();
+    let snap;
+    try { snap = buildStatusJson(await d.fetch(), { cliVersion: d.cliVersion, nowMs: now }); } catch (e) { snap = notRunning((e as Error).message, { cliVersion: d.cliVersion, nowMs: now }); }
+    if (done) break;
+    const key = changeKey(snap);
+    try {
+      if (key !== lastKey) { d.write(`${JSON.stringify(snap)}\n`); lastKey = key; lastLineAt = now; }
+      else if (now - lastLineAt >= heartbeat) { d.write(`${JSON.stringify({ schema: STATUS_SCHEMA, kind: 'heartbeat', generated_at: new Date(now).toISOString() })}\n`); lastLineAt = now; }
+    } catch { break; } // the reader went away
+    await sleep(interval, d.stopped);
+  }
+  return 0;
+}

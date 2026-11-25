@@ -160,6 +160,14 @@ CREATE TABLE kv (
 ALTER TABLE participants ADD COLUMN title TEXT;
 `,
   },
+  {
+    version: 4,
+    name: 'participant project root (git repository root of its folder) and conversation events index (agent panel)',
+    sql: `
+ALTER TABLE participants ADD COLUMN project_root TEXT;
+CREATE INDEX events_conversation ON events(conversation_id, type);
+`,
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)!.version;

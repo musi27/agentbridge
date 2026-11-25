@@ -8,14 +8,19 @@ import { versionMismatch } from '../version.ts';
 export interface WatchStatus {
   bridge_version: string; pid: number; started_at?: string | null; cli_version?: string;
   policy: { ok: boolean; mode?: string; version?: number; reason?: string };
-  participants: Array<{ address: string; title?: string; short_id: string; state: string; permission_mode: string; folder?: string }>;
+  participants: Array<{ address: string; title?: string; short_id: string; state: string; permission_mode: string; folder?: string; project?: { key: string; label: string } | null }>;
   auto_mode_sessions: string[];
   conversations: Record<string, number>;
   queued_deliveries: number;
-  pending_approvals: Array<{ approval_id: string; kind: string; participant: string; peer: string; topic?: string; turn_limit?: number; expires_in_s: number | null }>;
+  pending_approvals: Array<{ approval_id: string; kind: string; participant: string; peer: string; topic?: string; turn_limit?: number; expires_in_s: number | null; expires_at?: string | null; conversation_id?: string | null }>;
   live_connections?: number;
   notifications?: Array<{ at: string; title?: string; body?: string }>;
-  conversation_list?: Array<{ id: string; initiator: string; invitee: string; topic: string; state: string; turn_count: number; turn_limit: number; origin?: string; queued: boolean; updated_at: string }>;
+  conversation_list?: Array<{
+    id: string; initiator: string; invitee: string; topic: string; state: string; turn_count: number; turn_limit: number; origin?: string; queued: boolean; updated_at: string;
+    // 0.2.9+: ended-today rows, times and approval provenance (status --json)
+    created_at?: string; ended_at?: string | null; end_reason?: string | null;
+    approvals?: Array<{ kind: string; via: string; agent: string; at: string; turn_limit?: number }>;
+  }>;
   waiting_deliveries?: Array<{ participant: string; hold: string | null; count: number }>;
   recent_notices?: Array<{ at: string; title?: string; body?: string }>;
   relay?: { configured: boolean; connected: boolean | null; mode: string | null };

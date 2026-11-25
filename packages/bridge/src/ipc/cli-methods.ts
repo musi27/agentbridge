@@ -8,6 +8,7 @@ import { CLI_METHODS, shortId, type CliMethod, type IpcError } from '@agentbridg
 import { BRIDGE_VERSION, type Engine } from '../core/engine.ts';
 import { applySetting, describePolicy, isSelfHostedRelay, parseDuration } from '../policy/policy.ts';
 import { resolveAddress } from '../core/rules.ts';
+import { projectOf } from '../core/project.ts';
 import { GrokSetupError, type GrokSetup } from '../grok/setup.ts';
 
 export interface CliContext {
@@ -26,6 +27,8 @@ export interface CliContext {
 
 /** How many notices `status --watch` gets (newest last). */
 export const WATCH_NOTICES = 5;
+/** How many conversations that ended today (bridge local time) `status --watch` adds, most recently ended first. */
+export const WATCH_ENDED_TODAY = 20;
 
 type Out = { result?: unknown; error?: IpcError };
 const ok = (result: unknown): Out => ({ result });
@@ -115,20 +118,35 @@ export async function handleCli(ctx: CliContext, method: CliMethod, raw: unknown
       const watch = p['watch'] === true;
       const popups = watch ? [] : store.unshownPopups(); if (!watch) store.markShown(popups.map((x) => x.id));
       const notice = (x: { ts: number; data: string }): object => ({ at: new Date(x.ts).toISOString(), ...(JSON.parse(x.data) as object) });
-      const watchExtras = watch ? {
-        conversation_list: convs.filter((c) => c.state !== 'ended').map((c) => ({
-          id: c.id, initiator: addr(c.initiator_id), invitee: addr(c.invitee_id), topic: c.topic, state: c.state,
-          turn_count: c.turn_count, turn_limit: c.turn_limit, origin: c.origin, queued: !!c.queued, updated_at: new Date(c.updated_at).toISOString(),
-        })),
-        waiting_deliveries: waitingDeliveries(store.pendingDeliveries(), addr),
-        recent_notices: store.recentPopups(WATCH_NOTICES).map(notice),
-        relay: { ...(ctx.relay?.() ?? { configured: false, connected: null }), mode: ps.ok ? ps.policy.transport.relay_mode : null },
-        now: new Date(engine.clock.now()).toISOString(),
-      } : {};
+      const iso = (t: number | null): string | null => (t === null ? null : new Date(t).toISOString());
+      const watchExtras = watch ? (() => {
+        // live conversations, plus those that ended since local midnight (capped); never message bodies
+        const midnight = new Date(engine.clock.now()); midnight.setHours(0, 0, 0, 0);
+        const endedToday = convs.filter((c) => c.state === 'ended' && (c.ended_at ?? 0) >= midnight.getTime())
+          .sort((x, y) => (y.ended_at ?? 0) - (x.ended_at ?? 0)).slice(0, WATCH_ENDED_TODAY);
+        const listed = [...convs.filter((c) => c.state !== 'ended'), ...endedToday];
+        const approvals = new Map<string, Array<{ kind: string; via: string; agent: string; at: string; turn_limit?: number }>>();
+        for (const e of store.conversationEvents(listed.map((c) => c.id), 'conversation_approved')) {
+          const d = JSON.parse(e.data) as { kind: string; via: string; turn_limit?: number };
+          const list = approvals.get(e.conversation_id!) ?? []; approvals.set(e.conversation_id!, list);
+          list.push({ kind: d.kind, via: d.via, agent: e.participant_id ? addr(e.participant_id) : '?', at: new Date(e.ts).toISOString(), ...(d.turn_limit !== undefined ? { turn_limit: d.turn_limit } : {}) });
+        }
+        return {
+          conversation_list: listed.map((c) => ({
+            id: c.id, initiator: addr(c.initiator_id), invitee: addr(c.invitee_id), topic: c.topic, state: c.state,
+            turn_count: c.turn_count, turn_limit: c.turn_limit, origin: c.origin, queued: !!c.queued, updated_at: new Date(c.updated_at).toISOString(),
+            created_at: new Date(c.created_at).toISOString(), ended_at: iso(c.ended_at), end_reason: c.end_reason, approvals: approvals.get(c.id) ?? [],
+          })),
+          waiting_deliveries: waitingDeliveries(store.pendingDeliveries(), addr),
+          recent_notices: store.recentPopups(WATCH_NOTICES).map(notice),
+          relay: { ...(ctx.relay?.() ?? { configured: false, connected: null }), mode: ps.ok ? ps.policy.transport.relay_mode : null },
+          now: new Date(engine.clock.now()).toISOString(),
+        };
+      })() : {};
       return ok({
         bridge_version: BRIDGE_VERSION, pid: ctx.pid ?? process.pid, started_at: ctx.startedAt ? new Date(ctx.startedAt).toISOString() : null,
         policy: ps.ok ? { ok: true, version: ps.version, mode: ps.policy.approval.mode } : { ok: false, reason: ps.reason, detail: ps.detail },
-        participants: parts.map((x) => ({ address: `${x.agent}:${x.name}`, ...(x.title ? { title: x.title } : {}), short_id: shortId(x.id), state: x.state, permission_mode: x.permission_mode, ...(x.cwd ? { folder: basename(x.cwd) } : {}) })),
+        participants: parts.map((x) => ({ address: `${x.agent}:${x.name}`, ...(x.title ? { title: x.title } : {}), short_id: shortId(x.id), state: x.state, permission_mode: x.permission_mode, ...(x.cwd ? { folder: basename(x.cwd) } : {}), ...(watch ? { project: projectOf(x.project_root ?? null) } : {}) })),
         auto_mode_sessions: parts.filter((x) => x.permission_mode === 'auto').map((x) => `${x.agent}:${x.name}`),
         conversations: { pending: convs.filter((c) => c.state === 'pending').length, active: convs.filter((c) => c.state === 'active').length, ended: convs.filter((c) => c.state === 'ended').length },
         queued_deliveries: store.pendingDeliveries().length,

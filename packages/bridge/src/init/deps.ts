@@ -20,6 +20,7 @@ import { acquireLock } from '../service.ts';
 import type { Paths } from '../paths.ts';
 import { MARKETPLACE_NAME, type ClaudeRunner, type InitDeps, type PolicyAccess, type Prompter } from './init.ts';
 import type { UninstallDeps } from './uninstall.ts';
+import { cliEntry, type PanelDeps } from './panel.ts';
 
 const launchctlAt = (bin: string) => (args: string[]): Promise<{ code: number; out: string }> => new Promise((res) => {
   execFile(bin, args, { timeout: 30_000, encoding: 'utf8' }, (e, stdout, stderr) => res({ code: e ? (typeof (e as { code?: unknown }).code === 'number' ? (e as { code: number }).code : 1) : 0, out: `${stderr}${stdout}`.trim().slice(0, 4000) }));
@@ -96,6 +97,36 @@ export const readlinePrompter: Prompter = {
   },
 };
 
+export interface RealPanelInput {
+  paths: Paths;
+  /** --home given on the command line: passed to the panel's CLI calls. */
+  home?: string;
+  /** @agentbridge/presence PanelAgent (tests: one pointed at a temp LaunchAgents folder and a fake launchctl). */
+  agent: PanelDeps['agent'];
+  /** AgentBridge.app's executable (DEFAULT_HELPER_PATH). */
+  helperPath: string;
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+}
+
+/** Real PanelDeps: the stable node init picks for launchd, this package's CLI entry, the bundled AgentBridge.app. */
+export function realPanelDeps(i: RealPanelInput): PanelDeps {
+  const env = i.env ?? process.env;
+  return {
+    agent: i.agent,
+    prefPath: join(i.paths.root, 'panel.json'),
+    logDir: i.paths.logsDir,
+    program() {
+      if ((i.platform ?? process.platform) !== 'darwin') return { missing: 'the menu-bar panel is macOS-only' };
+      if (!existsSync(i.helperPath)) return { missing: `AgentBridge.app not found at ${i.helperPath}` };
+      const entry = cliEntry();
+      if (!entry) return { missing: 'the built CLI entry is missing (npm run build)' };
+      const lp = resolveLaunchPaths({ pathVar: env['PATH'], home: env['HOME'] ?? homedir(), execPath: process.execPath });
+      return { helperPath: i.helperPath, nodePath: lp.nodePath, cliEntry: entry, ...(i.home ? { home: resolve(i.home) } : {}) };
+    },
+  };
+}
+
 export interface RealDepsInput {
   paths: Paths; secrets: SecretStore; presence: PresenceChecker;
   service: ServiceManager & { uninstall(): Promise<void>; readonly plistPath: string; readonly serviceTarget: string };
@@ -106,6 +137,7 @@ export interface RealDepsInput {
   print(line: string): void; env?: NodeJS.ProcessEnv;
   /** Tests: a fake launchctl. */
   launchctlPath?: string;
+  panel?: PanelDeps;
 }
 
 export function realInitDeps(i: RealDepsInput): InitDeps {
@@ -177,6 +209,7 @@ export function realInitDeps(i: RealDepsInput): InitDeps {
     home: env['HOME'] ?? process.env['HOME'] ?? '/',
     service_entry: { entry: serviceEntry(), logDir: i.paths.logsDir },
     launchPaths: () => resolveLaunchPaths({ pathVar: env['PATH'], home: env['HOME'] ?? homedir(), execPath: process.execPath }),
+    ...(i.panel ? { panel: i.panel } : {}),
   };
 }
 
@@ -188,12 +221,13 @@ export interface RealUninstallInput {
   print(line: string): void; env?: NodeJS.ProcessEnv;
   /** Tests: a fake `claude`. */
   claudeBin?: string;
+  panel?: UninstallDeps['panel'];
 }
 
 export function realUninstallDeps(i: RealUninstallInput): UninstallDeps {
   const env = i.env ?? process.env;
   return {
-    presence: i.presence, service: i.service, secrets: i.secrets, paths: i.paths, print: i.print,
+    presence: i.presence, service: i.service, secrets: i.secrets, paths: i.paths, print: i.print, ...(i.panel ? { panel: i.panel } : {}),
     claude: claudeRunner(i.claudeBin),
     claudeSettingsPath: userSettingsPath(env),
     lockPid: () => liveLockPid(i.paths.lock, pidAlive),

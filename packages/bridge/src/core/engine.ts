@@ -20,6 +20,7 @@ import { ClaudeLinkAdapter } from '../delivery/claude-adapter.ts';
 import { ApprovalStore, type Approval, type StartContext } from './approvals.ts';
 import * as N from './notices.ts';
 import { readSessionTitle, sessionBaseName } from './session-label.ts';
+import { projectRoot } from './project.ts';
 import {
   canConfirm, canSend, checkExtend, checkInviteLimits, nextTurn, recipientMode, requesterMode, resolveAddress, resolveTurnLimit,
   transition, uniqueName, COOLDOWN_END_REASONS,
@@ -31,6 +32,14 @@ const LOCAL_AGENTS: ReadonlySet<AgentType> = new Set(['claude', 'codex', 'fake']
 const isHost = (a: AgentType): boolean => a === 'claude' || a === 'codex';
 const isLocal = (p: ParticipantRow): boolean => LOCAL_AGENTS.has(p.agent);
 const address = (p: ParticipantRow): string => `${p.agent}:${p.name}`;
+/** A participant's folder and its project (git repository root), set together so the root is computed once. */
+const cwdPatch = (cwd: string): { cwd: string; project_root: string } => ({ cwd, project_root: projectRoot(cwd) });
+/**
+ * How an approval took effect (agent panel provenance): `prompt` = bridge_confirm, answered in the agent's own
+ * permission prompt; `cli` = `agentbridge approve` (Touch ID); `allow_rule` = an auto allow rule matched (no human
+ * prompt); `bot` = a Grok bot invitee accepts by itself.
+ */
+export type ApprovalVia = 'prompt' | 'cli' | 'allow_rule' | 'bot';
 
 export interface Caller { participant_id: string; epoch: number }
 export interface CallOptions { conversation_id?: string; resultBytes?: number }
@@ -167,6 +176,8 @@ export class Engine {
     const now = this.clock.now();
     this.store.tx(() => {
       for (const p of this.store.participants()) if (LOCAL_AGENTS.has(p.agent) && (p.state === 'live' || p.state === 'unreachable')) this.store.updateParticipant(p.id, { state: 'closed', updated_at: now });
+      // participants from before the project column (migration 4): compute their project once
+      for (const p of this.store.participants()) if (p.cwd && !p.project_root) this.store.updateParticipant(p.id, { project_root: projectRoot(p.cwd) });
     });
     this.recoverApprovals();
     this.checkGone();
@@ -227,7 +238,7 @@ export class Engine {
       p = this.newParticipant(agent, uniqueName(slugifyName(o.name), taken), o.name, o.cwd ?? null);
     }
     const epoch = p.epoch + 1;
-    this.store.updateParticipant(p.id, { epoch, state: 'live', permission_mode: o.permission_mode ?? 'default', updated_at: now, ...(o.cwd ? { cwd: o.cwd } : {}) });
+    this.store.updateParticipant(p.id, { epoch, state: 'live', permission_mode: o.permission_mode ?? 'default', updated_at: now, ...(o.cwd && o.cwd !== p.cwd ? cwdPatch(o.cwd) : {}) });
     this.localEpochs.set(p.id, epoch);
     this.reissueStaleInvites(p.id, epoch);
     this.afterLive(p.id);
@@ -264,7 +275,7 @@ export class Engine {
   private newParticipant(agent: AgentType, name: string, display: string, cwd: string | null, state: ParticipantRow['state'] = 'closed', botId: string | null = null): ParticipantRow {
     const now = this.clock.now();
     const p: ParticipantRow = {
-      id: ulid(now), agent, name, display_name: sanitizeLabel(display, LIMITS.nameChars) || name, title: null, cwd, claude_pid: null, session_id: null, transcript_path: null,
+      id: ulid(now), agent, name, display_name: sanitizeLabel(display, LIMITS.nameChars) || name, title: null, cwd, project_root: cwd ? projectRoot(cwd) : null, claude_pid: null, session_id: null, transcript_path: null,
       permission_mode: agent === 'grok' ? 'default' : 'unknown', inbound: 'accept', state, epoch: 0, bot_id: botId, created_at: now, updated_at: now,
     };
     this.store.insertParticipant(p);
@@ -326,7 +337,7 @@ export class Engine {
     const now = this.clock.now();
     const prev = p.session_id && p.session_id !== sessionId ? p.session_id : null;
     this.store.upsertSession({ session_id: sessionId, participant_id: p.id, claude_pid: pid, source, transcript_path: transcript, cwd, linked_from: prev, created_at: now, last_seen_at: now });
-    this.store.updateParticipant(p.id, { session_id: sessionId, claude_pid: pid, updated_at: now, ...(transcript ? { transcript_path: transcript } : {}), ...(cwd && !p.cwd ? { cwd } : {}) });
+    this.store.updateParticipant(p.id, { session_id: sessionId, claude_pid: pid, updated_at: now, ...(transcript ? { transcript_path: transcript } : {}), ...(cwd && !p.cwd ? cwdPatch(cwd) : {}) });
     if (prev) this.event('info', 'session_linked', { from: prev, to: sessionId, source }, p.id);
   }
 
@@ -387,7 +398,7 @@ export class Engine {
     const secret = randomBytes(32).toString('base64url');
     this.secrets.set(secret, { participant_id: p.id, claude_pid: r.claude_pid, nonce: r.tag_nonce, epoch });
     this.links.set(p.id, entryFor(conn, { epoch, nonce: r.tag_nonce, claude_pid: r.claude_pid }));
-    this.store.updateParticipant(p.id, { epoch, claude_pid: r.claude_pid, inbound, state: inbound === 'accept' ? 'live' : 'unreachable', updated_at: now, ...(cwd && !p.cwd ? { cwd } : {}) });
+    this.store.updateParticipant(p.id, { epoch, claude_pid: r.claude_pid, inbound, state: inbound === 'accept' ? 'live' : 'unreachable', updated_at: now, ...(cwd && !p.cwd ? cwdPatch(cwd) : {}) });
     if (info) {
       const owner = this.store.session(info.session_id)?.participant_id;
       // a session id still live in another Claude process stays linked there (`--resume` in a second terminal)
@@ -667,6 +678,8 @@ export class Engine {
     c.first_message_id = first.id;
     this.store.tx(() => { this.store.insertConversation(c); this.store.insertMessage(first); });
     this.event('info', 'conversation_created', { origin, auto, peer: address(to) }, from.id, c.id);
+    if (auto) this.event('info', 'conversation_approved', { kind: 'start', via: 'allow_rule' satisfies ApprovalVia }, from.id, c.id);
+    else if (to.agent === 'grok') this.event('info', 'conversation_approved', { kind: 'accept', via: 'bot' satisfies ApprovalVia }, to.id, c.id);
     // Grok invitees auto-accept (§7.4 A3); auto allow match skips the accept approval (§7.4 B5).
     if (to.agent === 'grok' || auto) {
       if (isLocal(to) && auto) this.addRideAlong(c.id, to.id, N.autoAcceptedNotice(address(from), c.topic, c.turn_limit));
@@ -751,7 +764,7 @@ export class Engine {
       return fail(chk.reason, chk.reason === 'approval_mismatch' ? { hint: 'The confirmed facts differ from the approval as issued. Ask the user to approve the facts exactly as issued, or cancel.' } : {});
     }
     if (!canConfirm(p.permission_mode)) return fail('approval_unavailable', { hint: N.dontAskHint(facts.approval_id) });
-    const result = await this.resolveApproval(chk.approval, 'confirmed');
+    const result = await this.resolveApproval(chk.approval, 'confirmed', 'prompt');
     // remember the result for retries only once the approval is gone (a refusal leaves it confirmable)
     if (!this.approvals.get(facts.approval_id)) this.confirmed.set(facts.approval_id, { at: this.clock.now(), caller: `${p.id}|${caller.epoch}`, facts, result });
     return result;
@@ -770,8 +783,18 @@ export class Engine {
     return null;
   }
 
-  /** Apply a confirmed approval (bridge_confirm or `agentbridge approve`). */
-  private async resolveApproval(a: Approval, how: 'confirmed'): Promise<ToolResult> {
+  /**
+   * Apply a confirmed approval (bridge_confirm in the agent's own prompt = `prompt`, `agentbridge approve` = `cli`).
+   * Each approval that takes effect is logged as `conversation_approved` (kind, via; never the topic) for the panel.
+   */
+  private async resolveApproval(a: Approval, how: 'confirmed', via: ApprovalVia): Promise<ToolResult> {
+    const r = await this.applyApproval(a, how);
+    const convId = a.context.kind === 'start' ? (r.status !== 'failed' ? (r as { conversation_id?: string }).conversation_id : undefined) : r.status !== 'failed' ? a.context.conversation_id : undefined;
+    if (convId) this.event('info', 'conversation_approved', { kind: a.context.kind, via, approval_id: a.facts.approval_id, ...(a.context.kind === 'extend' ? { turn_limit: a.context.new_limit } : {}) }, a.participant_id, convId);
+    return r;
+  }
+
+  private async applyApproval(a: Approval, how: 'confirmed'): Promise<ToolResult> {
     // §8.4 at confirm time: a session may have switched to bypassPermissions since the approval was issued.
     // Refuse before any state change; the approval stays issued in case the mode is switched back.
     const unsafe = this.unsafeAtConfirm(a);
@@ -1429,10 +1452,11 @@ export class Engine {
     return err('unauthenticated', `user presence check failed (${r.code}${r.detail ? `: ${r.detail}` : ''})`);
   }
 
-  pendingApprovals(): Array<{ approval_id: string; kind: string; participant: string; peer: string; topic: string; turn_limit: number; expires_in_s: number | null }> {
+  pendingApprovals(): Array<{ approval_id: string; kind: string; participant: string; peer: string; topic: string; turn_limit: number; expires_in_s: number | null; expires_at: string | null; conversation_id: string | null }> {
     return this.approvals.all().map((a) => {
       const p = this.store.participant(a.participant_id);
-      return { approval_id: a.facts.approval_id, kind: a.facts.kind, participant: p ? address(p) : '?', peer: a.facts.peer, topic: a.facts.topic, turn_limit: a.facts.turn_limit, expires_in_s: a.expires_at === null ? null : Math.max(0, Math.round((a.expires_at - this.clock.now()) / 1000)) };
+      return { approval_id: a.facts.approval_id, kind: a.facts.kind, participant: p ? address(p) : '?', peer: a.facts.peer, topic: a.facts.topic, turn_limit: a.facts.turn_limit, expires_in_s: a.expires_at === null ? null : Math.max(0, Math.round((a.expires_at - this.clock.now()) / 1000)),
+        expires_at: a.expires_at === null ? null : new Date(a.expires_at).toISOString(), conversation_id: a.context.kind === 'start' ? null : a.context.conversation_id };
     });
   }
 
@@ -1441,7 +1465,7 @@ export class Engine {
     if (!this.policyOk()) return fail('policy_tampered');
     const a = this.approvals.get(id);
     if (!a || a.state !== 'issued') return fail('unknown_approval');
-    return this.resolveApproval(a, 'confirmed');
+    return this.resolveApproval(a, 'confirmed', 'cli');
   }
   declineById(id: string): ToolResult {
     const a = this.approvals.get(id);

@@ -8,6 +8,8 @@ export interface ParticipantRow {
   id: string; agent: AgentType; name: string; display_name: string; title: string | null; cwd: string | null; claude_pid: number | null;
   session_id: string | null; transcript_path: string | null; permission_mode: PermissionMode; inbound: Inbound;
   state: ParticipantState; epoch: number; bot_id: string | null; created_at: number; updated_at: number;
+  /** Git repository root of `cwd` (or `cwd` itself outside a repository); computed once when `cwd` is set. */
+  project_root?: string | null;
 }
 export interface SessionRow {
   session_id: string; participant_id: string; claude_pid: number | null; source: string | null; transcript_path: string | null;
@@ -52,9 +54,9 @@ export class Store {
 
   // ---------- participants ----------
   insertParticipant(p: ParticipantRow): void {
-    this.db.run(`INSERT INTO participants (id, agent, name, display_name, title, cwd, claude_pid, session_id, transcript_path, permission_mode, inbound, state, epoch, bot_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.id, p.agent, p.name, p.display_name, p.title ?? null, p.cwd, p.claude_pid, p.session_id,
-    p.transcript_path, p.permission_mode, p.inbound, p.state, p.epoch, p.bot_id, p.created_at, p.updated_at);
+    this.db.run(`INSERT INTO participants (id, agent, name, display_name, title, cwd, claude_pid, session_id, transcript_path, permission_mode, inbound, state, epoch, bot_id, created_at, updated_at, project_root)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.id, p.agent, p.name, p.display_name, p.title ?? null, p.cwd, p.claude_pid, p.session_id,
+    p.transcript_path, p.permission_mode, p.inbound, p.state, p.epoch, p.bot_id, p.created_at, p.updated_at, p.project_root ?? null);
   }
   participant(id: string): ParticipantRow | undefined { return this.db.get<ParticipantRow>('SELECT * FROM participants WHERE id = ?', id); }
   participants(): ParticipantRow[] { return this.db.all<ParticipantRow>('SELECT * FROM participants ORDER BY created_at, id'); }
@@ -212,6 +214,11 @@ export class Store {
     return this.db.all<EventRow>(`SELECT * FROM (SELECT * FROM events ${w} ORDER BY id DESC LIMIT ?) ORDER BY id ASC`, ...vals, opts.limit ?? 200);
   }
   unshownPopups(): EventRow[] { return this.db.all<EventRow>('SELECT * FROM events WHERE popup = 1 AND shown = 0 ORDER BY id'); }
+  /** Events of one type for these conversations, oldest first (agent panel: approval provenance). */
+  conversationEvents(conversationIds: readonly string[], type: string): EventRow[] {
+    if (!conversationIds.length) return [];
+    return this.db.all<EventRow>(`SELECT * FROM events WHERE type = ? AND conversation_id IN (${conversationIds.map(() => '?').join(', ')}) ORDER BY id`, type, ...conversationIds);
+  }
   /** The newest popups, shown or not (read-only: `status --watch` must not take them from `status`). */
   recentPopups(limit: number): EventRow[] { return this.db.all<EventRow>('SELECT * FROM events WHERE popup = 1 ORDER BY id DESC LIMIT ?', limit).reverse(); }
   markShown(ids: number[]): void { for (const id of ids) this.db.run('UPDATE events SET shown = 1 WHERE id = ?', id); }

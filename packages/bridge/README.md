@@ -1,6 +1,6 @@
 # @agentbridge/bridge
 
-The bridge service core (SPEC v0.4 §4.1): the single sequencer and source of truth for conversations between local
+The bridge service core (SPEC §4.1): the single sequencer and source of truth for conversations between local
 Claude Code sessions and Grok bots. It stores state in SQLite, holds approvals in memory, enforces policy, runs the
 delivery queue, serves the local IPC socket, and ships the `agentbridge` CLI.
 

@@ -3,7 +3,7 @@
 // diagnostic here (contributors can't re-sign); release packing refuses it (packaging/npm/scripts/build.ts).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -21,7 +21,12 @@ function copySources(): string {
 }
 
 test('sources hash covers every helper source and changes with any of them', () => {
-  assert.deepEqual(SOURCE_FILES, ['native/main.swift', 'native/Info.plist', 'native/AppIcon.icns', 'native/build.sh']);
+  assert.deepEqual(SOURCE_FILES, ['native/main.swift', 'native/PanelModel.swift', 'native/PanelApp.swift', 'native/Info.plist', 'native/AppIcon.icns', 'native/build.sh']);
+  // build.sh compiles exactly the Swift files the manifest covers, and every .swift file in native/ is one of them
+  const build = readFileSync(join(PRESENCE_DIR, 'native', 'build.sh'), 'utf8');
+  const compiled = [.../swift_files="([^"]+)"/.exec(build)![1]!.matchAll(/\$here\/(\S+\.swift)/g)].map((m) => `native/${m[1]}`);
+  assert.deepEqual(compiled, SOURCE_FILES.filter((f) => f.endsWith('.swift')));
+  assert.deepEqual(readdirSync(join(PRESENCE_DIR, 'native')).filter((f) => f.endsWith('.swift')).map((f) => `native/${f}`).sort(), [...compiled].sort());
   const d = copySources();
   try {
     const base = sourcesHash(sourceHashes(d));

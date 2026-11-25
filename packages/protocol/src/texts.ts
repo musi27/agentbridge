@@ -1,4 +1,4 @@
-// Normative texts from SPEC v0.4 appendices. Generated from SPEC.md; a test checks they still match.
+// Normative texts from SPEC appendices. Generated from SPEC.md; a test checks they still match.
 import { NONCE_RE } from './ids.ts';
 import { LIMITS } from './limits.ts';
 

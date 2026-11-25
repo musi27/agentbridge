@@ -2,7 +2,7 @@
   "name": "@agentbridge/protocol",
   "version": "0.4.0",
   "private": true,
-  "description": "agentbridge wire protocol: schemas, enums, framing, contracts (SPEC v0.4)",
+  "description": "agentbridge wire protocol: schemas, enums, framing, contracts (SPEC)",
   "type": "module",
   "exports": { ".": { "agentbridge-source": "./src/index.ts", "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
   "files": ["dist"],

@@ -240,3 +240,29 @@ test('uninstall: real deps wiring with a fake claude and launchctl in temp dirs'
     'launchctl bootout gui/501/live.musi.agentbridge',
   ]);
 });
+
+test('uninstall removes the menu-bar panel login item too (always, purge or not), after the bridge agent', async (t) => {
+  const w = world(); t.after(w.cleanup);
+  const panelPlist = join(w.root, 'LaunchAgents', 'live.musi.agentbridge.panel.plist');
+  writeFileSync(panelPlist, '<plist/>');
+  w.deps.panel = {
+    plistPath: panelPlist,
+    status: async () => (existsSync(panelPlist) ? 'running' : 'not_installed'),
+    uninstall: async () => { w.events.push('panel uninstall'); rmSync(panelPlist, { force: true }); },
+  };
+  const r = await runUninstall(w.deps);
+  assert.equal(r.ok, true, w.lines.join('\n'));
+  assert.equal(status(r)['panel'], 'removed');
+  assert.equal(existsSync(panelPlist), false);
+  assert.deepEqual(w.events.slice(3, 5), ['launchd uninstall', 'panel uninstall']);
+  assert.match(w.lines.join('\n'), /removed {2}menu-bar panel and .*live\.musi\.agentbridge\.panel\.plist/);
+  // re-run: absent, still ok
+  const again = await runUninstall(w.deps);
+  assert.equal(status(again)['panel'], 'absent');
+  // a failing bootout is reported with the manual fix
+  writeFileSync(panelPlist, '<plist/>');
+  w.deps.panel.uninstall = async () => { throw new Error('launchctl bootout failed (exit 5)'); };
+  const bad = await runUninstall(w.deps);
+  assert.equal(bad.ok, false);
+  assert.equal(bad.steps.find((s) => s.id === 'panel')!.fix, `launchctl bootout gui/$(id -u)/live.musi.agentbridge.panel; rm ${panelPlist}`);
+});

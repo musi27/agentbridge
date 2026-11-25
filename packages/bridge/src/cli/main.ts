@@ -16,7 +16,7 @@ import type { WatchStatus } from './panel.ts';
 import type { RelayRuntime as RelayRuntimeT } from '../relay/runtime.ts';
 
 export const PRIVILEGED = new Set(['config set', 'config verify', 'approve', 'decline', 'extend', 'revoke', 'remove', 'add', 'show', 'end', 'stop', 'identity', 'purge', 'uninstall']);
-export const COMMANDS = ['status', 'agents', 'conversations', 'doctor', 'logs', 'open', 'start', 'stop', 'config', 'approve', 'decline', 'extend', 'end', 'show', 'remove', 'revoke', 'add', 'identity', 'purge', 'init', 'uninstall', 'serve', 'help'];
+export const COMMANDS = ['status', 'agents', 'conversations', 'doctor', 'logs', 'open', 'start', 'stop', 'config', 'approve', 'decline', 'extend', 'end', 'show', 'remove', 'revoke', 'add', 'identity', 'purge', 'init', 'uninstall', 'panel', 'serve', 'help'];
 
 export interface Parsed { cmd: string; args: string[]; json: boolean; home?: string }
 export class UsageError extends Error {}
@@ -55,8 +55,12 @@ const HELP = `agentbridge — conversations between your Claude Code sessions, C
 Unprivileged:
   status [--watch] | agents | conversations | doctor [grok:<name>] | logs [--limit N] | open <address> | start | config get
   status --watch: live view of agents, conversations, what waits on you, notices and health (Ctrl-C to quit)
+  status --json: one snapshot for apps and scripts; status --watch --json: one JSON object per line on every change
+    (schema: https://github.com/musi27/agentbridge/blob/main/docs/status-json.md)
 Setup:
-  init | add codex | remove codex   (add codex: connect Codex CLI sessions; edits ~/.codex/config.toml)
+  init [--skip-panel] | add codex | remove codex   (add codex: connect Codex CLI sessions; edits ~/.codex/config.toml)
+  panel [start|stop|status]   menu-bar panel: what waits on you, your agents and their conversations (read-only)
+    on by default (init starts it at login); panel stop turns it off for good, panel start turns it back on
 Privileged (Touch ID / password, checked by the bridge):
   approve <id> | decline <id> | extend <id> <n> | end <id> | end --inactive <duration> | show <id>
   config set <key> <value> | config verify [show|reapprove|restore] | remove <address> | purge [--before <duration>] | stop
@@ -165,10 +169,12 @@ async function callWithVersion(socket: string, method: string, params: unknown, 
 
 /**
  * `agentbridge status --watch`: redraws in place on a TTY (one IPC connection, polled every 1.5 s); otherwise prints
- * one snapshot. With --json, prints the raw watch snapshot once (the shape AgentBridge.app will poll).
+ * one snapshot. With --json (docs/status-json.md): `status --json` prints one snapshot object, `status --watch --json`
+ * prints one JSON object per line until Ctrl-C or until the reader closes the pipe. Both read `cli.status {watch: true}`,
+ * which is read-only (no Touch ID, leaves notices for plain `status`).
  */
-async function watchStatus(socket: string, json: boolean, print: Print, tty: boolean): Promise<number> {
-  const { runWatch } = await import('./watch.ts');
+async function watchStatus(socket: string, o: { watch: boolean; json: boolean }, print: Print, tty: boolean): Promise<number> {
+  const { runWatch, runWatchJson } = await import('./watch.ts');
   let client: IpcClient | null = null;
   const fetch = async (): Promise<WatchStatus> => {
     try {
@@ -177,7 +183,30 @@ async function watchStatus(socket: string, json: boolean, print: Print, tty: boo
     } catch (e) { client?.close(); client = null; throw e; }
   };
   try {
-    if (json) { print(JSON.stringify({ ...(await fetch()), cli_version: BRIDGE_VERSION }, null, 2)); return 0; }
+    if (o.json && !o.watch) {
+      const { buildStatusJson, notRunning } = await import('./status-json.ts');
+      try { print(JSON.stringify(buildStatusJson(await fetch(), { cliVersion: BRIDGE_VERSION, nowMs: Date.now() }), null, 2)); return 0; }
+      catch (e) { print(JSON.stringify(notRunning((e as Error).message, { cliVersion: BRIDGE_VERSION, nowMs: Date.now() }), null, 2)); return 1; }
+    }
+    if (o.json) {
+      const real = print === stdoutPrint;
+      const out = process.stdout;
+      const cleanups: Array<() => void> = [];
+      const stopped = new Promise<void>((resolve) => {
+        const stop = (): void => resolve();
+        // EPIPE: the reader closed the pipe (`| head -1`); Node ignores SIGPIPE itself and reports it here
+        const onErr = (): void => resolve();
+        process.once('SIGINT', stop); process.once('SIGTERM', stop);
+        cleanups.push(() => { process.off('SIGINT', stop); process.off('SIGTERM', stop); });
+        if (real) { out.on('error', onErr); cleanups.push(() => { out.off('error', onErr); }); }
+      });
+      try {
+        return await runWatchJson({
+          fetch, cliVersion: BRIDGE_VERSION, stopped,
+          write: real ? (line) => { if (!out.writable) throw new Error('stdout closed'); out.write(line); } : (line) => { print(line.replace(/\n$/, '')); },
+        });
+      } finally { for (const c of cleanups) c(); }
+    }
     return await runWatch({
       fetch, cliVersion: BRIDGE_VERSION, color: !process.env['NO_COLOR'],
       out: tty
@@ -352,6 +381,7 @@ export function parseInitArgs(args: readonly string[]): import('../init/init.ts'
     else if (a === '--skip-plugin') o.skipPlugin = true;
     else if (a === '--skip-service') o.skipService = true;
     else if (a === '--skip-relay') o.skipRelay = true;
+    else if (a === '--skip-panel') o.skipPanel = true;
     else throw new UsageError(`unknown init option ${a}`);
   }
   if (o.relayUrl) { try { const u = new URL(o.relayUrl); if (u.protocol !== 'https:' && !(u.protocol === 'http:' && (u.hostname === '127.0.0.1' || u.hostname === 'localhost'))) throw new Error(); } catch { throw new UsageError('--relay must be an https URL (http only for localhost)'); } }
@@ -361,14 +391,14 @@ export function parseInitArgs(args: readonly string[]): import('../init/init.ts'
 async function init(home: string | undefined, args: readonly string[], print: Print): Promise<number> {
   const opts = parseInitArgs(args);
   const { runInit } = await import('../init/init.ts');
-  const { realInitDeps } = await import('../init/deps.ts');
+  const { realInitDeps, realPanelDeps } = await import('../init/deps.ts');
   const presence = await import('@agentbridge/presence');
   const paths = resolvePaths(home);
   if (!existsSync(paths.root)) mkdirSync(paths.root, { recursive: true, mode: 0o700 });
   let secrets, checker;
   try { secrets = await presence.createSecretStore({ stateDir: paths.runDir }); checker = await presence.createPresenceChecker(); }
   catch (e) { print(`agentbridge init: ${(e as Error).message}`); return 1; }
-  const report = await runInit(realInitDeps({ paths, secrets, presence: checker, service: new presence.LaunchdServiceManager(), startBridge: async () => { await startDetached(home, { duringSetup: true }); }, serviceFor: (environment) => new presence.LaunchdServiceManager({ environment: { ...environment, ...(home ? { AGENTBRIDGE_HOME: paths.root } : {}) } }), print }), opts);
+  const report = await runInit(realInitDeps({ paths, secrets, presence: checker, service: new presence.LaunchdServiceManager(), startBridge: async () => { await startDetached(home, { duringSetup: true }); }, serviceFor: (environment) => new presence.LaunchdServiceManager({ environment: { ...environment, ...(home ? { AGENTBRIDGE_HOME: paths.root } : {}) } }), print, panel: realPanelDeps({ paths, ...(home ? { home } : {}), agent: new presence.PanelAgent(), helperPath: presence.DEFAULT_HELPER_PATH }) }), opts);
   print(report.ok ? '\nagentbridge is set up.' : '\nSome steps need attention (see FAIL lines above); fix them and run agentbridge init again.');
   return report.ok ? 0 : 1;
 }
@@ -392,9 +422,23 @@ async function uninstall(home: string | undefined, args: readonly string[], json
   try { checker = await presence.createPresenceChecker(); }
   catch (e) { print(`agentbridge uninstall: ${(e as Error).message}\nThe Touch ID helper is needed to confirm it is you. To remove agentbridge by hand, follow docs/troubleshooting.md ("Uninstall").`); return 1; }
   const out: string[] = [];
-  const report = await runUninstall(realUninstallDeps({ paths: resolvePaths(home), presence: checker, service: new presence.LaunchdServiceManager(), secrets: () => presence.createSecretStore({ stateDir: resolvePaths(home).runDir }), print: json ? (l) => out.push(l) : print }), opts);
+  const report = await runUninstall(realUninstallDeps({ paths: resolvePaths(home), presence: checker, service: new presence.LaunchdServiceManager(), panel: new presence.PanelAgent(), secrets: () => presence.createSecretStore({ stateDir: resolvePaths(home).runDir }), print: json ? (l) => out.push(l) : print }), opts);
   if (json) print(JSON.stringify(report, null, 2));
   return report.ok ? 0 : 1;
+}
+
+/** `agentbridge panel [start|stop|status]`: the menu-bar panel's login item (init/panel.ts). Not privileged: it only shows. */
+async function panelCommand(home: string | undefined, args: readonly string[], json: boolean, print: Print): Promise<number> {
+  const sub = args[0] ?? 'status';
+  if (!['start', 'stop', 'status'].includes(sub) || args.length > 1) throw new UsageError('usage: agentbridge panel [start|stop|status]');
+  const { panelStart, panelStop, panelStatus } = await import('../init/panel.ts');
+  const { realPanelDeps } = await import('../init/deps.ts');
+  const presence = await import('@agentbridge/presence');
+  const deps = realPanelDeps({ paths: resolvePaths(home), ...(home ? { home } : {}), agent: new presence.PanelAgent(), helperPath: presence.DEFAULT_HELPER_PATH });
+  const r = sub === 'start' ? await panelStart(deps) : sub === 'stop' ? await panelStop(deps) : await panelStatus(deps);
+  if (json) print(JSON.stringify(r, null, 2));
+  else print(`${r.ok ? '' : 'FAIL '}${r.detail}${r.fix ? `\n  fix: ${r.fix}` : ''}`);
+  return r.ok ? 0 : 1;
 }
 
 const stdoutPrint: Print = (s) => { process.stdout.write(`${s}\n`); };
@@ -409,6 +453,7 @@ export async function main(argv: readonly string[], print: Print = stdoutPrint, 
     if (p.cmd === 'help' || p.cmd === '--help') { print(HELP); return 0; }
     if (p.cmd === 'init') return await init(p.home, p.args, print);
     if (p.cmd === 'uninstall') return await uninstall(p.home, p.args, p.json, print);
+    if (p.cmd === 'panel') return await panelCommand(p.home, p.args, p.json, print);
     if (p.cmd === 'start') { print(await startDetached(p.home)); return 0; }
     if (p.cmd === 'serve') { await serve(p.home, print); return -1; }
     if ((p.cmd === 'add' || p.cmd === 'remove') && p.args[0] === 'codex') return await codexSetup(p.cmd, print);
@@ -423,13 +468,12 @@ export async function main(argv: readonly string[], print: Print = stdoutPrint, 
       if (p.json) print(JSON.stringify({ checks }, null, 2)); else human('doctor', { checks }, print);
       return checks.every((c) => c.ok) ? 0 : 1;
     }
-    if (req.method === 'cli.status' && (req.params as { watch?: boolean }).watch) return await watchStatus(socket, p.json, print, print === stdoutPrint && !io && process.stdout.isTTY === true);
+    if (req.method === 'cli.status' && ((req.params as { watch?: boolean }).watch || p.json)) return await watchStatus(socket, { watch: (req.params as { watch?: boolean }).watch === true, json: p.json }, print, print === stdoutPrint && !io && process.stdout.isTTY === true);
     const { result, bridgeVersion } = await callWithVersion(socket, req.method, req.params, req.method === 'cli.doctor' && (req.params as { round_trip?: string }).round_trip ? 150_000 : undefined);
     let r = result;
     if (req.method === 'cli.doctor' && r && typeof r === 'object' && Array.isArray((r as { checks?: unknown }).checks)) {
       r = { ...r, checks: [versionCheck(bridgeVersion), ...(r as { checks: unknown[] }).checks] };
     }
-    if (req.method === 'cli.status' && r && typeof r === 'object') r = { ...r, cli_version: BRIDGE_VERSION };
     if (p.json) print(JSON.stringify(r, null, 2)); else human(p.cmd, r, print);
     return 0;
   } catch (e) {

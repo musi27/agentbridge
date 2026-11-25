@@ -1,17 +1,19 @@
 {
-  "sourcesSha256": "e3da6b0e484262f4e824fd595274d9dad179338e4679d86ec1a258bb64bf008a",
+  "sourcesSha256": "ca4d0a67ce56b0f6c5b195605db6143a3216bc5ec20452ffddf110543ec5c8fd",
   "files": {
-    "native/main.swift": "2561a86d926c28be1fa42365f2412949e8fdcbc61ccfbcb5099ed596d26a0764",
+    "native/main.swift": "bf146f48ab62a2c9603c068341cf50629c8ca4068abd61c2c51a412618e196f3",
+    "native/PanelModel.swift": "bed786c180544b0d4a3192f92ff368672e5dbc8000165e932242dbcd16db4f08",
+    "native/PanelApp.swift": "c148731fe7134e15fe2bd7dd660f525173156869a6b0f8c6efb74f8c33132f72",
     "native/Info.plist": "ed5d98bcc3126495dd3be3f0fd90608bfb055ca46c32213055fa8bd722766711",
     "native/AppIcon.icns": "461117044e980f33a49cb81f1ee44b5a5c89d1802ba201829ceb6f0825535358",
-    "native/build.sh": "1a98c2d09e00ed46955310e900a472fdae5928e3b02dac25283bc7ffc7ca0017"
+    "native/build.sh": "6a62e3383d7dce3e2f2bb70b9ca2bedd7e07b56c1d66d82b099f4ca8363b4fb7"
   },
   "identifier": "live.musi.agentbridge",
   "teamId": "67B9AY2VHJ",
   "cdhashes": {
-    "arm64": "829c544bbdbf7ebf2a74c43bb91d9c56ffc7b1dc",
-    "x86_64": "c79e2b7859b0908c39717092719221f48f625d6f"
+    "arm64": "61b81ded9bd3f46109029caf70eada8b59c08f85",
+    "x86_64": "dd20b5117812a1d6a58c1051b7337593b0f43eb7"
   },
   "swiftc": "Apple Swift version 6.4.2 (swiftlang-6.4.2.1.9 clang-2100.4.1.1)",
-  "signedAt": "2026-11-25T07:41:31.184Z"
+  "signedAt": "2026-11-25T16:08:43.244Z"
 }

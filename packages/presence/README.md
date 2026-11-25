@@ -9,6 +9,7 @@ macOS platform layer for the bridge. It implements the interfaces in
 | `SecretStore` | `MacKeychainStore` (login keychain, one item for all secrets), `InMemorySecretStore` (tests) | §15.5 |
 | `Notifier` | `OsascriptNotifier` — `osascript display notification` (also from the launchd agent) | §9.1 |
 | `ServiceManager` | `LaunchdServiceManager` — `~/Library/LaunchAgents/live.musi.agentbridge.plist` | §14.1 |
+| (agent panel) | `PanelAgent` — `~/Library/LaunchAgents/live.musi.agentbridge.panel.plist`, runs `AgentBridge panel` at login | — |
 
 ## Entry points for the bridge
 
@@ -42,7 +43,8 @@ Package exports carry the repo-wide `agentbridge-source` condition, which points
 `native/build.sh` builds `bin/AgentBridge.app`, a background app bundle (dev and tests use this
 ad-hoc signed build; releases ship the Developer ID-signed copy in `signed/`, see below):
 
-- `Contents/MacOS/AgentBridge`: `native/main.swift` as one universal (arm64 + x86_64) binary
+- `Contents/MacOS/AgentBridge`: `native/main.swift`, `PanelModel.swift` and `PanelApp.swift` as one universal (arm64 +
+  x86_64) binary
 - `Contents/Info.plist`: copied from `native/Info.plist`. Bundle id `live.musi.agentbridge`, name
   "AgentBridge", `LSUIElement` (no Dock icon, no menu bar). It is a fixed file with no version
   stamped in, so the build's bytes only change when the code, plist or icon does.
@@ -51,8 +53,8 @@ ad-hoc signed build; releases ship the Developer ID-signed copy in `signed/`, se
 The dev bundle is ad-hoc signed with the identifier `live.musi.agentbridge`. Because the
 executable runs from inside the bundle, macOS dialogs name it **"AgentBridge"** and show its icon:
 "AgentBridge is trying to ⟨reason⟩." The bridge always runs it by its full path
-(`DEFAULT_HELPER_PATH`); it is never opened with `open` or LaunchServices. Later the same bundle is
-meant to host notifications (docs/notifications.md) and the agent panel.
+(`DEFAULT_HELPER_PATH`); it is never opened with `open` or LaunchServices. It also hosts the agent panel
+(`AgentBridge panel`, below); notifications are meant to follow (docs/notifications.md).
 
 `AppIcon.icns` is committed. To regenerate it from the 1024 px master PNG:
 
@@ -85,6 +87,25 @@ exit:   0 = a response was written (even ok:false); 2 = usage or protocol error
 service `agentbridge.test.<suffix>`; anything else is a `bad_request`. So this trusted binary
 cannot be used to read other apps' items.
 | `version` | — | `version`, `protocol` |
+
+**`panel` is the exception: long-running, argv options, no stdin request.** It is the agent panel's menu-bar dropdown
+(`native/PanelApp.swift`, view model in `native/PanelModel.swift`) and the only path that starts AppKit; main.swift
+hands `panel` off before the one-request guard, so the subcommands above behave exactly as before.
+
+```
+AgentBridge panel [--home <dir>] -- <node> [node args…] <cli entry>   # the menu-bar app (what PanelAgent's plist runs)
+AgentBridge panel --print-model [--now <iso>] [--filter <text>]      # no UI: status snapshot on stdin → view model JSON
+AgentBridge panel --snapshot-file <file.json>                        # the menu-bar app showing one saved snapshot
+AgentBridge panel --render-png <out.png> --snapshot-file <f> [--tab agents] [--dark]   # draw it off-screen (screenshots)
+```
+
+The app runs `<node> <cli> status --watch --json` as a child and decodes one line per change
+([docs/status-json.md](../../docs/status-json.md)), so the JSON shaping stays in TypeScript. It restarts the child with
+backoff (1 s doubling to 30 s) when it exits, kills and restarts it after 45 s without a line (three missed
+heartbeats), shows "agentbridge isn't running" for a `running: false` snapshot, and stops reading on a `schema` above 1
+("Update agentbridge"). One panel per user (a lock in `$TMPDIR`); SIGTERM (launchd's bootout) stops the child and exits
+0, so `KeepAlive {SuccessfulExit: false}` doesn't restart it. "Turn off menu-bar panel" runs `<cli> panel stop`.
+Fixtures for 5 and 50 agents: `test/fixtures/panel-snapshots.ts` (run it with a folder to write them as JSON).
 
 **Secrets never appear in argv or env.** Values travel only over stdin and stdout. The Node side
 also starts the helper with a minimal env (`PATH` only). The helper never writes to stderr.

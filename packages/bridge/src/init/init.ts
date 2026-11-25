@@ -8,6 +8,7 @@ import { AUTO_MODE_WARNING, LIMITS, allSecretNames, type ApprovalMode, type Doct
 import { installDenyRules, readEffectiveCrossSessionInbound, inboundFix, versionAtLeast, parseVersion, type SettingsPathOptions } from '@agentbridge/adapter-claude-code';
 import type { Policy } from '../policy/policy.ts';
 import type { LaunchPaths } from './launch-env.ts';
+import { initPanelStep, type PanelDeps } from './panel.ts';
 import { ensureIdentity, loadIdentity, registerIdentity, RelayHttpError } from '../relay/identity.ts';
 
 export const PUBLIC_RELAY = 'https://relay.musi.live';
@@ -90,6 +91,8 @@ export interface InitDeps {
   service_entry: { entry: string | null; logDir: string };
   /** Stable node path, claude path and plist PATH, from the CLI's environment (launch-env.ts). */
   launchPaths(): LaunchPaths;
+  /** The agent panel's login item (panel.ts); absent in tests that don't cover it. */
+  panel?: PanelDeps;
 }
 
 export interface InitOptions {
@@ -100,6 +103,8 @@ export interface InitOptions {
   skipPlugin?: boolean;
   skipService?: boolean;
   skipRelay?: boolean;
+  /** Don't install the menu-bar panel's login item (an existing one is left as it is). */
+  skipPanel?: boolean;
 }
 
 export interface InitStep { id: string; ok: boolean; detail: string; fix?: string; skipped?: boolean }
@@ -349,6 +354,9 @@ export async function runInit(deps: InitDeps, o: InitOptions = {}): Promise<Init
       step({ id: 'codex', ok: false, detail: `could not refresh the Codex setup: ${(e as Error).message}`, fix: 'agentbridge add codex' }, deps, steps);
     }
   }
+
+  // 10b. the agent panel's menu-bar dropdown: on by default, off for good once the user turned it off
+  if (deps.panel) step(await initPanelStep(deps.panel, { skip: o.skipPanel === true }), deps, steps);
 
   // 11. doctor (needs the running bridge)
   if (!(await deps.bridgeRunning())) step({ id: 'doctor', ok: true, skipped: true, detail: 'doctor skipped: the bridge is not running', fix: 'agentbridge start, then agentbridge doctor' }, deps, steps);

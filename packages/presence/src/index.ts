@@ -6,3 +6,4 @@ export { withFileLock, LockTimeoutError, type FileLockOptions } from './keychain
 export * from './notifier.ts';
 export * from './launchd.ts';
 export * from './factories.ts';
+export * from './panel.ts';

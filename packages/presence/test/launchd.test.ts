@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, existsSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { renderPlist, xmlEscape, parseLaunchctlPrint, LaunchdServiceManager, LAUNCHD_LABEL } from '../src/launchd.ts';
+import { PanelAgent, PANEL_LABEL, panelProgramArguments } from '../src/panel.ts';
 import type { Runner, RunResult } from '../src/exec.ts';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'ab-launchd-'));
@@ -141,4 +142,54 @@ test('status: running / stopped (loaded but not running) / stopped (not loaded);
 
 test('label is validated', () => {
   assert.throws(() => new LaunchdServiceManager({ label: '../evil', uid: 1 }), TypeError);
+});
+
+test('PanelAgent: its own label and plist, runs AgentBridge panel with node + CLI entry, logs panel.*.log, bridge env not inherited', async (t) => {
+  if (process.platform !== 'darwin') return t.skip('macOS only (plutil)');
+  const dir = tmp();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const fake = fakeLaunchctl((a) => (a[0] === 'bootout' ? res(3) : res(0)));
+  const a = new PanelAgent({ launchAgentsDir: join(dir, 'LaunchAgents'), uid: 501, runner: fake.runner });
+  assert.equal(a.plistPath, join(dir, 'LaunchAgents', 'live.musi.agentbridge.panel.plist'));
+  const logDir = join(dir, 'logs');
+  await a.install({ helperPath: '/pkg/bin/AgentBridge.app/Contents/MacOS/AgentBridge', nodePath: '/opt/homebrew/bin/node', cliEntry: '/pkg/dist/cli.mjs', home: '/tmp/ab home' }, logDir);
+  const parsed = JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', a.plistPath], { encoding: 'utf8' }));
+  assert.deepEqual(parsed, {
+    Label: PANEL_LABEL,
+    ProgramArguments: ['/pkg/bin/AgentBridge.app/Contents/MacOS/AgentBridge', 'panel', '--home', '/tmp/ab home', '--', '/opt/homebrew/bin/node', '/pkg/dist/cli.mjs'],
+    RunAtLoad: true,
+    KeepAlive: { SuccessfulExit: false },   // "Quit until next login" exits 0 and stays quit; a crash restarts
+    ThrottleInterval: 10,
+    ProcessType: 'Interactive',
+    StandardOutPath: join(logDir, 'panel.out.log'),
+    StandardErrorPath: join(logDir, 'panel.err.log'),
+    EnvironmentVariables: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
+  });
+  assert.deepEqual(fake.calls, [['bootout', `gui/501/${PANEL_LABEL}`], ['bootstrap', 'gui/501', a.plistPath]]);
+  assert.deepEqual(panelProgramArguments({ helperPath: '/h', nodePath: '/n', cliEntry: '/c' }), ['/h', 'panel', '--', '/n', '/c']);
+});
+
+test('PanelAgent.uninstall deletes the plist before the bootout (the panel may be the process asking)', async (t) => {
+  const dir = tmp();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  let plistAtBootout: boolean | null = null;
+  const a = new PanelAgent({ launchAgentsDir: dir, uid: 501, runner: async (_f, args) => { if (args[0] === 'bootout') plistAtBootout = existsSync(a.plistPath); return res(0); } });
+  writeFileSync(a.plistPath, 'x');
+  await a.uninstall();
+  assert.equal(plistAtBootout, false);
+  assert.ok(!existsSync(a.plistPath));
+  // the bridge's own manager keeps bootout-then-delete (a failed bootout leaves the plist in place)
+  let bridgePlistAtBootout: boolean | null = null;
+  const m = new LaunchdServiceManager({ launchAgentsDir: dir, uid: 501, runner: async (_f, args) => { if (args[0] === 'bootout') bridgePlistAtBootout = existsSync(m.plistPath); return res(0); } });
+  writeFileSync(m.plistPath, 'x');
+  await m.uninstall();
+  assert.equal(bridgePlistAtBootout, true);
+});
+
+test('installProgram validates its log name and log dir', async (t) => {
+  const dir = tmp();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const m = new LaunchdServiceManager({ launchAgentsDir: dir, uid: 501, runner: fakeLaunchctl(() => res(0)).runner });
+  await assert.rejects(m.installProgram({ programArguments: ['/x'], logDir: 'rel', logName: 'panel' }), /logDir must be an absolute path/);
+  await assert.rejects(m.installProgram({ programArguments: ['/x'], logDir: dir, logName: '../evil' }), /invalid log name/);
 });

@@ -1,7 +1,7 @@
 # Contributing
 
-Thanks for helping. agentbridge is pre-release; [SPEC.md](SPEC.md) (v0.4) is the authoritative design. If a
-change contradicts it, change the spec in the same pull request and say why.
+Thanks for helping. [SPEC.md](SPEC.md) is the authoritative design and threat model, kept current with each release. If
+a change contradicts it, change the spec in the same pull request and say why.
 
 Security issues go through [SECURITY.md](SECURITY.md), not public issues.
 

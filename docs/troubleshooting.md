@@ -292,9 +292,36 @@ agentbridge config verify
 It needs user presence. It shows the current policy against the last verified one; re-approve the current policy if
 you made the change, or restore the last verified one. Then find out what edited the file.
 
+## The menu-bar panel: turn it off, or it doesn't show
+
+`agentbridge init` starts the [menu-bar panel](../README.md#menu-bar-panel) and has it start at login. To turn it off
+for good, choose **Turn off menu-bar panel** from its ••• menu, or run:
+
+```bash
+agentbridge panel stop
+```
+
+It removes the panel's login item (`~/Library/LaunchAgents/live.musi.agentbridge.panel.plist`) and remembers the
+choice in `~/.agentbridge/panel.json`, so a later `init` leaves it off. `agentbridge panel start` turns it back on;
+`agentbridge init --skip-panel` never starts it.
+
+If the icon doesn't appear, check:
+
+```bash
+agentbridge panel status
+```
+
+"turned off" means someone ran `panel stop`; run `panel start`. "not installed (on by default)" means `init` couldn't
+start it (its output says why). If it says running but there's no icon, the menu bar may be full: macOS hides items
+that don't fit, so close or rearrange others. Errors go to `~/.agentbridge/logs/panel.err.log`.
+
+The panel shows "agentbridge isn't running" while the bridge is down and reconnects by itself when it starts. "Update
+agentbridge" means the CLI speaks a newer status format than the panel: run `agentbridge init` after
+`npm install -g @musi27/agentbridge` so both come from the same release.
+
 ## Uninstall
 
-`agentbridge uninstall` removes the plugin, the launchd agent and the deny rules, and stops the bridge; add
+`agentbridge uninstall` removes the plugin, the launchd agent, the menu-bar panel's login item and the deny rules, and stops the bridge; add
 `--purge-data` to also delete `~/.agentbridge` and the Keychain items. See [the README](../README.md#uninstall). Lines
 marked `FAIL` come with a fix; `absent` means that part was already gone. Running it again is safe.
 
@@ -318,6 +345,16 @@ yourself:
 
    ```bash
    rm ~/Library/LaunchAgents/live.musi.agentbridge.plist
+   ```
+
+   And the menu-bar panel's login item:
+
+   ```bash
+   launchctl bootout gui/$(id -u)/live.musi.agentbridge.panel
+   ```
+
+   ```bash
+   rm ~/Library/LaunchAgents/live.musi.agentbridge.panel.plist
    ```
 
 3. Remove the Claude Code plugin and its marketplace:

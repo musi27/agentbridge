@@ -9,6 +9,7 @@
 | [setup-codex.md](setup-codex.md) | Connect Codex CLI sessions with `agentbridge add codex`, trust the hooks, and how approval works there |
 | [troubleshooting.md](troubleshooting.md) | Unreachable sessions, held deliveries, unsafe permission modes, Claude Code version, bridge and relay problems, Touch ID |
 | [self-hosting.md](self-hosting.md) | Run your own relay on Vercel and Upstash |
+| [status-json.md](status-json.md) | `agentbridge status --json` and `status --watch --json`: the versioned snapshot schema the agent panel reads, with an example |
 
 ## Security
 
@@ -21,11 +22,11 @@
 
 | Document | What's in it |
 |---|---|
-| [../SPEC.md](../SPEC.md) | The specification (v0.4, authoritative) |
+| [../SPEC.md](../SPEC.md) | The specification: design and threat model (authoritative) |
 | [notifications.md](notifications.md) | Desktop notifications from the bridge service: findings and the proposal for guaranteed delivery |
 | [releasing.md](releasing.md) | Building, verifying and publishing the npm package |
 | [release-notes/](release-notes/README.md) | User-facing notes for each release (the GitHub release bodies) |
-| [release-signing.md](release-signing.md) | Release signing and notarisation plan for the Touch ID helper |
+| [release-signing.md](release-signing.md) | How the Touch ID and keychain helper (`AgentBridge.app`) is Developer ID-signed, and why |
 
 ## Contributing
 

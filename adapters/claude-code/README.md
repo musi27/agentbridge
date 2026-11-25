@@ -1,6 +1,6 @@
 # @agentbridge/adapter-claude-code
 
-The Claude Code side of agentbridge (SPEC v0.4 §8.1, §8.4, §10, §11).
+The Claude Code side of agentbridge (SPEC §8.1, §8.4, §10, §11).
 
 - `plugin/` is the Claude Code plugin: an MCP stdio server declared inline in `.claude-plugin/plugin.json`, plus the hooks in `hooks/hooks.json`. It is listed in the in-repo marketplace (`/.claude-plugin/marketplace.json`).
 - `src/` holds the sources. The bridge imports `ClaudeCodeAdapter`, `readEffectiveCrossSessionInbound`, `installDenyRules` and `checkDenyRules` from the package root.

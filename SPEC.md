@@ -1,111 +1,25 @@
 # agentbridge — Specification
 
-**Status:** Draft v0.4, revised after a verification phase (M0) whose findings are folded into this document.
-**Working name:** `agentbridge` (final name TBD)
+This is the design and threat model of agentbridge: what it protects, what it doesn't, and how the bridge, adapters,
+approvals, framing, protocol, relay, CLI and storage work. It describes release **0.2.8**. Where the code and this
+document disagree, that is a bug in one of them.
+
+How-to guides (setup, Grok and Codex setup, security, troubleshooting, self-hosting, releasing) are in
+[docs/](docs/README.md).
+
 **License:** MIT
-**Date:** 2026-11-22
 
 ---
 
-## 0. Change log
+## 0. Release history
 
-### v0.4 (M0 results; numbers in parentheses refer to the internal M0 change list)
-
-- **v1 is macOS-only** (owner decision). Linux and WSL 2 move to v1.1 (§1.3, §9, §14, §15, §18, §20). (1)
-- **Threat model:** auto mode and Agent SDK hosts named as ways around the local prompts (§2.3). Auto-mode sessions allowed with warnings (owner decision, §8.4). (3, 4)
-- **Approvals:** M0-verified behaviour of the always-ask prompt written into §7.3. Hook rewrites and "Tab to amend" lead to `approval_mismatch`. (5, 6, 7)
-- **Claude Code adapter:**
-  - registration links sessions by Claude process, not session ID
-  - the MCP server reads the inbox socket itself
-  - the permission mode is unknown until the first event that carries it
-  - posts have no delivery outcome, so `crossSessionInbound` is checked up front
-  - every post is unique, and posts may coalesce
-  - (§8, §10, §11; 8–15)
-- **Grok:**
-  - **thin deliveries:** the routine run sees only ≈ 4,000 characters of the webhook body, so payloads carry previews and the run fetches full text over the connector (§12.4)
-  - the webhook results mapping is measured
-  - the Allow rule is mandatory and "Ask first" is dropped from setup
-  - the round-trip check is mandatory
-  - facts updated: timeout 90–120 s, no retries, cards expire ≈ 20 min, run reports reach the main chat
-  - a local per-bot delivery cap
-  - the Cursor/Anysphere data path
-  - (§6, §12, §13.6; 16–21)
-- **Relay:**
-  - same region as Redis
-  - 20 s response wait
-  - proactive make-before-break reconnect at ~270 s
-  - deployment-compatible stream formats
-  - usage alerts in the operator gate
-  - (§13; 22–24)
-
-### v0.3 (second review; items R2-1 to R2-17 refer to it)
-
-- **Threat model narrowed (decision A, R2-1, R2-2):**
-  - Protected: manipulation that arrives through conversations, and local agents using agentbridge's own tools.
-  - Out of scope: a local agent that deliberately tampers with agentbridge from its shell or files. This is stated openly in §2.3 and in the README.
-  - Cheap hardening kept:
-    - pending approvals live only in bridge memory
-    - approvals are bound to the participant that requested them
-    - one live connection per session
-    - the bridge runs the user-presence check itself
-    - password-based fallback
-    - more CLI commands made privileged
-    - policy integrity downgraded to "detects casual tampering" and made fail-closed (R2-17)
-- **One invite → accept → confirm sequence (§7.4, R2-3).** `bridge_respond_invite` is removed. Accept approvals are issued together with the invite, and declining uses `bridge_decline`. `direction` is defined, and the facts shown for extensions are defined.
-- **Framing:**
-  - Per-session random tag nonce with exact escaping.
-  - Remote-written text (e.g. topic) is always in a marked untrusted block, never inside a bridge notice.
-  - Invite caps and cooldowns (§8, R2-4).
-- **Grok:**
-  - Notice-only deliveries.
-  - Distinct `awaiting_local_approval` status.
-  - Grok column in the notification table (§9, R2-5).
-  - The relay allocates IDs for relay-originated starts (§13, R2-6).
-- **Session identity:**
-  - Registration through a hook-issued ticket.
-  - `/clear`, compaction, fork and resume handling.
-  - The permission mode is refreshed on every hook event.
-  - Bypass-mode sessions are refused up front (§10, §11, R2-7, R2-8).
-- **Idempotency** scoped per registration epoch. Body-hash deduplication applies only when no peer message came in between (§6.4, R2-9).
-- **States, end reasons and codes** reconciled into single enums (§6, §16, R2-10).
-- **Turn and reply rules defined:**
-  - "expected reply"
-  - what happens at the turn limit
-  - failed messages don't consume turns
-  - one Grok reply per message
-  - serialized deliveries to Grok (§6.5, R2-11)
-- **Grok packing:** limits and transcript item fields (§12.4, R2-12).
-- **Grok setup:**
-  - recommended Allow rule for replying
-  - the user pastes the routine instruction
-  - `doctor` round-trip check (§12.5, R2-13)
-- **Prompt wording tightened (Appendices B, C).** The data-exfiltration residual risk is stated (§2.4, R2-14).
-- **Relay control methods, wake/poll, response waiting, trimming, MCP handling, encryption keys** specified (§13, R2-15).
-- **Relay trust claims reworded.** "Self-hosted relay" defined (§13.6, R2-16).
-- **Facts updated from first-party docs (§11, §12.1):**
-  - plugins can't ship deny rules
-  - the standing instruction goes in the MCP `instructions` field (≤ 4,096 chars)
-  - messaging env vars reach hooks, not MCP servers
-  - `crossSessionInbound` still applies
-  - Grok: 200 runs/hour per routine and 300/hour across routines; 30-minute card expiry; routines can auto-pause; webhook returns 200 = run started, anything else = not started
-- **M0 expanded into a verification plan** with tracks, a time-box, results template and kill criteria.
-- **Deferred to after M0:** second-review items 18–25 (transcript paging, participant cleanup, deny-list `remove`, privileged re-`init`, macOS helper signing plan, test harness "human", popup details, turn default for relay origin).
-
-### v0.2 (first review)
-
-- Scope cut.
-- Threat model added.
-- Two-step confirm with `requiresUserInteraction`.
-- Inbox socket instead of channels.
-- Grok setup without self-registration.
-- Relay RPC with durable queue.
-- State machines, reordered milestones.
+See [docs/release-notes/](docs/release-notes/README.md) and the GitHub releases page.
 
 ---
 
 ## 1. Summary
 
-agentbridge lets a Claude Code session and a Grok Bot hold real two-way conversations. A user can tell Claude Code *"discuss this design with grok:researcher"*, or tell a Grok bot *"ask claude:auth-refactor whether the migration is done"*. The agents then exchange messages until the conversation ends.
+agentbridge lets Claude Code sessions, Codex CLI sessions (§11a) and Grok Bots hold real two-way conversations. A user can tell Claude Code *"discuss this design with grok:researcher"*, or tell a Grok bot *"ask claude:auth-refactor whether the migration is done"*. The agents then exchange messages until the conversation ends.
 
 It is open source. Each user runs their own **bridge** (a background service and CLI). A **relay** at `relay.musi.live` (self-hostable) lets Grok bots, which run in xAI's cloud, reach the user's laptop.
 
@@ -139,7 +53,7 @@ It is open source. Each user runs their own **bridge** (a background service and
 | Approval modes | `per_conversation` (default), `auto` | `manual`, per-pair overrides; optional "strict mode" (OS password for every approval) |
 | Offline | Queue + notify | Background resume, fresh worker |
 
-Claude ↔ Claude conversations work as a side effect and serve as the M1 test vehicle. They are not a headline feature.
+Claude ↔ Claude conversations work as a side effect and serve as the main test vehicle. They are not a headline feature.
 
 ---
 
@@ -173,12 +87,12 @@ Claude ↔ Claude conversations work as a side effect and serve as the M1 test v
 Rationale: anything running as the user can do what the user can. Real protection would need OS-level separation (a separate system user), which is deferred.
 
 Also in this category:
-- **an Agent SDK host** (any local program that runs Claude through the Agent SDK): its `canUseTool` callback can approve `bridge_confirm` (M0, V1)
+- **an Agent SDK host** (any local program that runs Claude through the Agent SDK): its `canUseTool` callback can approve `bridge_confirm`
 - **a spawned copy of the plugin's MCP server**: it can answer `bridge_confirm` without any prompt, so the bridge only accepts confirms from the registered connection (§7.3)
 
 Practical mitigations:
-- In Claude Code's **default** mode, each such action needs the user to approve a shell or file command first (M0, V13).
-  - **Auto** mode's classifier may run them without asking. In M0 it ran all four tested tampering commands with no prompt.
+- In Claude Code's **default** mode, each such action needs the user to approve a shell or file command first.
+  - **Auto** mode's classifier may run them without asking. In testing it ran all four tried tampering commands with no prompt.
   - **Bypass** mode asks nothing.
   - agentbridge warns about auto mode (§8.4) and refuses bypass sessions.
 - agentbridge ships deny rules for its sensitive commands and paths (§11.4). They are incomplete by nature: `sh -c`, the CLI's script entry point and arbitrary programs reading `~/.agentbridge` get past them.
@@ -193,7 +107,7 @@ Also out of scope:
 
 - **Data leaving via conversation.** `bridge_send` is not gated, so a manipulated remote agent could talk a local agent into sending file contents or secrets.
   - Those would go to xAI (SpaceXSI) and pass through the relay.
-  - Grok Bot runs on Cursor (Anysphere) infrastructure (webhook host `api2.cursor.sh`), so they would pass through Cursor's servers too. Cursor is not on xAI's subprocessor list (M0, V12).
+  - Grok Bot runs on Cursor (Anysphere) infrastructure (webhook host `api2.cursor.sh`), so they would pass through Cursor's servers too. Cursor is not on xAI's subprocessor list.
   - Mitigation: the standing instruction (Appendix C) and the user's own approval of each conversation. The README says so.
 - **Grok-side approval is optional and user-configured** (§7.4).
 - **Grok's relays of run results to the user's chat are model-mediated** (best effort).
@@ -249,7 +163,8 @@ Also out of scope:
    - holds the relay connection and secrets
 2. **Relay** (`packages/relay`): Vercel + Upstash Redis.
 3. **Protocol** (`packages/protocol`): schemas, enums, framing.
-4. **Adapters:** `adapters/claude-code`, `adapters/grok-bot`, `adapters/fake`.
+4. **Adapters:** `adapters/claude-code` (also serves Codex CLI, §11a), `adapters/grok-bot`, `adapters/fake`.
+5. **Platform** (`packages/presence`): `AgentBridge.app` (Touch ID and keychain helper, §9.2, §15.5), notifications, the launchd service.
 
 ### 4.2 Traffic paths
 
@@ -349,7 +264,7 @@ Also out of scope:
 | Extension | Must be confirmed **before** the limit (`ended` is terminal). Local side only: `bridge_extend_conversation` → approval (§7), or `agentbridge extend` (user presence). Grok has no extend tool. Its delivery shows `turns_left`, so it can ask the local side or the user. |
 | One Grok reply per message | The bridge accepts at most one Grok `message` per local message it was delivered (`in_reply_to`, or else the latest delivery). Extra replies → `duplicate_reply`, returned to the run. |
 | Serialized deliveries to Grok | Per conversation, at most one delivery to Grok is awaiting a reply. Further local messages are held and sent together in the next delivery, either when Grok replies or after 5 minutes without a reply. |
-| Inactivity notice | 1 h (§6.2). For a Grok recipient, an extra one-time hint at 25 min: "Grok may be waiting on an approval card in your Grok chat" (cards expire after ≈ 20 min, M0 V6). |
+| Inactivity notice | 1 h (§6.2). For a Grok recipient, an extra one-time hint at 25 min: "Grok may be waiting on an approval card in your Grok chat" (cards expire after ≈ 20 min, §12.1). |
 | Queue expiry | 7 d. The sender is notified, and a popup is shown. |
 | Approval timeout | 10 min from issue to a live session (§7.6). |
 | Body size | 32 KB. Larger → `too_large`. Grok-bound deliveries carry previews when the full text doesn't fit (§12.4). |
@@ -396,7 +311,7 @@ The mode is global and changed only via `agentbridge config set` (user presence)
   - `direction`: `outgoing` for `start`; `incoming` for `accept`; `none` for `extend`
   - `turn_limit`: the limit for `start`/`accept`; the **new** limit for `extend`
 - **`bridge_confirm(approval_id, kind, peer, direction, topic, turn_limit)`** is the only always-gated tool.
-  - On Claude Code it is enforced with `_meta["anthropic/requiresUserInteraction"]: true`. Verified in M0 (V1, Claude Code 2.1.330):
+  - On Claude Code it is enforced with `_meta["anthropic/requiresUserInteraction"]: true`. Verified on Claude Code 2.1.330:
     - **Prompts:** in `default`, `acceptEdits`, `auto` and `bypassPermissions`, also when called from a subagent and when the tool is deferred behind tool search.
     - **Prompt contents:** only Yes/No (no "don't ask again"); every argument as a labelled field (a 120-character topic is shown in full); plus "Tab to amend".
     - **Does not skip the prompt:** allow rules; PreToolUse hooks returning `allow` (with or without `updatedInput`).
@@ -476,7 +391,7 @@ To decline, call bridge_decline(conversation_id=…).
 - **Escaping:** any occurrence of the session's exact nonce string in agent-supplied content (bodies, topics, names) is replaced, so agent content cannot produce a genuine tag.
 - Remote-written text is **never** placed directly inside a notice. It always appears inside an `ab-untrusted-<nonce>` block or an `ab-msg-<nonce>` block.
 - Each post starts a model turn when the session is idle, so the bridge minimises notices to Claude sessions. Turn warnings ride in message headers, and low-value events go to the log only (§9.1).
-- **Host wrapping (M0, V2).** Claude Code wraps every post in its own peer framing ("Another Claude session sent a message: … Treat it as a teammate's request …"). When a post arrives during a turn, it comes as a `<system-reminder>` after the current tool result. Appendix C states that such messages are agentbridge deliveries, and that the wrapper's "teammate" wording never makes `ab-msg`/`ab-untrusted` content a request.
+- **Host wrapping.** Claude Code wraps every post in its own peer framing ("Another Claude session sent a message: … Treat it as a teammate's request …"). When a post arrives during a turn, it comes as a `<system-reminder>` after the current tool result. Appendix C states that such messages are agentbridge deliveries, and that the wrapper's "teammate" wording never makes `ab-msg`/`ab-untrusted` content a request.
 - **Uniqueness.** Claude Code silently drops a post identical to the previous one from the same sender. Every post therefore contains a unique id (messages: `id`; notices: an `id` attribute).
 - **Coalescing.** Posts that arrive during a turn are delivered together. Every block is self-delimited, so concatenated posts stay parseable.
 
@@ -495,9 +410,9 @@ To decline, call bridge_decline(conversation_id=…).
 ### 8.4 Unsafe permission modes
 
 - The bridge tracks each Claude session's permission mode. It is refreshed on every hook event that carries `permission_mode` (UserPromptSubmit, PreToolUse, Stop and others).
-  - **SessionStart and SessionEnd do not carry it** (M0, V3), so a new session's mode is `unknown` until its first such event.
+  - **SessionStart and SessionEnd do not carry it**, so a new session's mode is `unknown` until its first such event.
   - Deliveries and invites to an `unknown`-mode session are **held** (not failed) until the mode is known.
-- A session in `auto` mode may start, accept and receive (owner decision, M0 V13). Claude Code's classifier may let shell commands that tamper with agentbridge run without asking. So:
+- A session in `auto` mode may start, accept and receive. Claude Code's classifier may let shell commands that tamper with agentbridge run without asking. So:
   - `init` explains this and recommends default mode for sessions that talk to other agents.
   - Every invite notice and `pending_approval` result for an auto-mode session carries a warning line: "This session is in auto mode: Claude Code may not ask before shell commands, so read this approval prompt carefully."
   - `status` and `doctor` list auto-mode sessions.
@@ -521,7 +436,7 @@ Structured JSON with separate fields for the message, transcript and notices (§
 **Where notices go:**
 - **Primary:** an `ab-notice` in the relevant live Claude session.
 - **Grok:** a field in the next delivery, or a **notice-only delivery** when no message is pending (§12.4).
-- **Desktop popup:** when the relevant Claude session is closed, when the user must act, or when there is no chat to land in. macOS: `osascript` → Notification Center (verified in M0, V11). Linux `notify-send` → v1.1.
+- **Desktop popup:** when the relevant Claude session is closed, when the user must act, or when there is no chat to land in. macOS: `osascript` → Notification Center, also from the launchd agent ([docs/notifications.md](docs/notifications.md)). Linux `notify-send` → v1.1.
 - **No notification service:** shown on the next CLI invocation.
 - **Everything:** log + `status`.
 
@@ -540,7 +455,7 @@ Structured JSON with separate fields for the message, transcript and notices (§
 | Held message rejected by bridge | – | ✓ notice-only | – | ✓ |
 | Grok delivery failed (not started, paused, key, over limit, network) | ✓ | – | ✓ with fix-it hint | ✓ |
 | Unsafe mode refusal | ✓ | ✓ tool result or notice-only | ✓ | ✓ |
-| Policy tamper (bridge stopped, §9.4) | – | – | ✓ | ✓ |
+| Policy tamper (bridge stopped, §9.3) | – | – | ✓ | ✓ |
 | Relay disconnected > 5 min | – | – | ✓ | ✓ |
 | Bridge restarted after downtime | – | – | ✓ catch-up | ✓ |
 
@@ -561,10 +476,10 @@ Structured JSON with separate fields for the message, transcript and notices (§
 
 | Platform | Check |
 |---|---|
-| macOS (v1) | LocalAuthentication, `deviceOwnerAuthentication` (Touch ID, falling back to the account password), via a small Swift helper the bridge launches. Verified unsigned in development (M0, V5). Release builds need Developer ID signing and notarisation. Map `LAError` codes to messages: −2 cancel, −1 failed, −4 system cancel, −6 unavailable. |
+| macOS (v1) | LocalAuthentication, `deviceOwnerAuthentication` (Touch ID, falling back to the account password), via `AgentBridge.app`: a small Swift helper app with no Dock icon (`LSUIElement`, identifier `live.musi.agentbridge`) that the bridge launches, so the system dialog names "AgentBridge". The same helper does all keychain access (§15.5). Release builds are signed with the project's Developer ID certificate, with the hardened runtime and a secure timestamp. The signed bundle is committed at `packages/presence/signed/` with a manifest of its sources, and packing refuses a bundle that is stale or fails the signature checks ([docs/release-signing.md](docs/release-signing.md)). It is not notarised: packages installed with npm aren't quarantined, so Gatekeeper doesn't block it. Dev builds are ad hoc signed. `LAError` codes map to distinct messages: −2 cancel, −1 failed, −4 system cancel, −6 unavailable. |
 | Linux / WSL (v1.1) | polkit `auth_self`, or a PAM password check. Not in v1. |
 
-Within decision A this protects against agents casually or accidentally running privileged commands. It does not stop determined local tampering (§2.3).
+Within the §2.3 boundary this protects against agents casually or accidentally running privileged commands. It does not stop determined local tampering (§2.3).
 
 ### 9.3 Policy integrity ("detects casual tampering")
 
@@ -591,11 +506,11 @@ Within decision A this protects against agents casually or accidentally running 
 - Unix domain socket `~/.agentbridge/run/bridge.sock`. The directory is `0700`, the socket `0600`, and the peer UID is checked.
 - Newline-delimited JSON frames: `{ id, type: req|res|evt, method, params|result|error }`, ≤ 256 KB.
 - **Handshake:** `hello { protocol: 1, client, client_version }` → `{ protocol, bridge_version }` or `version_unsupported`.
-- **Registration (revised from M0, V3).** The **Claude process** (its PID) is the anchor, not the session ID.
+- **Registration.** The **Claude process** (its PID) is the anchor, not the session ID.
   1. **The SessionStart hook** (a direct child of `claude`) calls `session_event { claude_pid, session_id, source, transcript_path, cwd }`.
      - `claude_pid` is the hook's parent PID.
      - The hook gets **no** `permission_mode` on SessionStart.
-  2. **The MCP server** (also a direct child of `claude`) reads `CLAUDE_CODE_MESSAGING_SOCKET` and `CLAUDE_CODE_MESSAGING_TOKEN` from its own environment. They are present (M0). It then calls `register_session { claude_pid, inbox: {socket, token}, tag_nonce }`. The bridge:
+  2. **The MCP server** (also a direct child of `claude`) reads `CLAUDE_CODE_MESSAGING_SOCKET` and `CLAUDE_CODE_MESSAGING_TOKEN` from its own environment. It then calls `register_session { claude_pid, inbox: {socket, token}, tag_nonce }`. The bridge:
      - verifies the connecting process is a child of `claude_pid` (macOS `proc_pidinfo`; best effort, §2.3)
      - binds the connection to the participant for that Claude process (creating it if new)
      - increments the registration epoch
@@ -612,7 +527,7 @@ Within decision A this protects against agents casually or accidentally running 
 - **CLI connections:** unprivileged methods directly. Privileged methods trigger the bridge-run presence check (§9.2).
 - **Unauthenticated connections:** `hello`, `ping`, `session_event` (hook; only from a child of a known or new Claude process) only.
 - **Liveness:**
-  - Live while the MCP server connection is open. Disconnect → `closed`. This is authoritative, including `kill -9`, where SessionEnd doesn't fire (M0, V3).
+  - Live while the MCP server connection is open. Disconnect → `closed`. This is authoritative, including `kill -9`, where SessionEnd doesn't fire.
   - SessionEnd (normal exit, Ctrl-C, terminal close) is an early hint only.
   - A closed participant whose `transcript_path` no longer exists → `gone`.
 - **Single instance:** lock file `~/.agentbridge/run/bridge.lock`.
@@ -637,10 +552,10 @@ Within decision A this protects against agents casually or accidentally running 
 - A Claude Code plugin from the in-repo marketplace, containing:
   - an MCP server (stdio)
   - hooks: SessionStart, SessionEnd, plus any events needed to refresh the permission mode
-- The **standing instruction** (Appendix C) goes in the MCP server's `instructions` field. Claude Code truncates it after about 4,096 characters, adding a `… [truncated]` notice (M0, V4). CI checks that Appendix C with the nonce expanded stays under 4,000. Plugin `CLAUDE.md` files are not loaded.
-- **Deny rules** cannot ship inside a plugin: a plugin `settings.json` permission rule is ignored (M0, V4). `init` writes them into the user's Claude Code settings (§11.4), and `doctor` checks they are present.
-- **Plugin layout:** the plugin's `.mcp.json` must not sit in a folder users open as a project. Claude Code would offer it as a separate project server (M0).
-- **Minimum Claude Code version:** 2.1.330, the version M0 verified. `doctor` warns on older versions.
+- The **standing instruction** (Appendix C) goes in the MCP server's `instructions` field. Claude Code truncates it after about 4,096 characters, adding a `… [truncated]` notice. CI checks that Appendix C with the nonce expanded stays under 4,000. Plugin `CLAUDE.md` files are not loaded.
+- **Deny rules** cannot ship inside a plugin: a plugin `settings.json` permission rule is ignored. `init` writes them into the user's Claude Code settings (§11.4), and `doctor` checks they are present.
+- **Plugin layout:** the plugin's `.mcp.json` must not sit in a folder users open as a project. Claude Code would offer it as a separate project server.
+- **Minimum Claude Code version:** 2.1.330, the verified version. `init` and `doctor` warn on older versions.
 - `doctor` also checks:
   - cross-session messaging is available (`/list-agents` support)
   - not bare mode
@@ -649,7 +564,7 @@ Within decision A this protects against agents casually or accidentally running 
 
 ### 11.3 Receiving
 
-- **Primary path (verified in M0, V2):**
+- **Primary path (verified on Claude Code 2.1.330):**
   1. The bridge sends items to the session's MCP server over IPC.
   2. The MCP server posts into its own session's inbox socket.
      - Wire format: newline-delimited JSON, an optional `{"type":"auth","token":"<CLAUDE_CODE_MESSAGING_TOKEN>"}` line, then `{"type":"user","message":{"role":"user","content":"<text>"}}`.
@@ -661,7 +576,7 @@ Within decision A this protects against agents casually or accidentally running 
   - Under `hold`, posts are held even from the own child, and the user sees only a notice.
   - Under `refuse`, posts vanish without a trace.
   - So at registration and in `doctor`, the bridge reads the effective setting (user, project, local and managed settings files for the session's cwd). If it is `hold` or `refuse`, the participant is marked `unreachable`: deliveries stay queued, the sender gets `recipient_unreachable`, and a popup explains how to set `accept`.
-- **Fallback (no live MCP server):** the bridge does not post as a peer; items stay queued until the session reopens. In M0, non-child posts were held in bypass sessions and gave no outcome.
+- **Fallback (no live MCP server):** the bridge does not post as a peer; items stay queued until the session reopens. In testing, posts from a process that was not the session's child were held in bypass sessions and gave no outcome.
 - **Channels are not used.** Never declare `claude/channel/permission`.
 
 ### 11.4 Tools
@@ -685,7 +600,7 @@ All prefixed `bridge_`.
 - `Bash(agentbridge config:*)`, `Bash(agentbridge approve:*)`, `Bash(agentbridge decline:*)`, `Bash(agentbridge extend:*)`, `Bash(agentbridge revoke:*)`, `Bash(agentbridge remove:*)`, `Bash(agentbridge add:*)`, `Bash(agentbridge purge:*)`, `Bash(agentbridge identity:*)`, `Bash(agentbridge show:*)`, `Bash(agentbridge end:*)`, `Bash(agentbridge stop:*)`, `Bash(agentbridge uninstall:*)`
 - writes and edits under `~/.agentbridge/**`
 
-These are defence in depth, and incomplete by design (M0, V4).
+These are defence in depth, and incomplete by design (tested on Claude Code 2.1.330).
 - **Blocked:** plain forms; `env`/`VAR=` prefixes; absolute and relative paths; `cd … &&`; `true;`; `$VAR` expansion.
 - **Not blocked:** `sh -c '…'`; `node …/cli.js …`; a global flag placed before the subcommand; programs such as `sqlite3` opening files in `~/.agentbridge`.
 
@@ -763,25 +678,25 @@ started with `--host=codex`.
 
 ### 12.1 Facts
 
-Sources: Grok Bot self-report (SR), xAI docs (D), and M0 measurements (M0, with check id).
+Sources: Grok Bot self-report (SR), xAI docs (D), and measurements with the Grok Bot app in November 2026 (T).
 
 | Fact | Source |
 |---|---|
-| Auto-review checks every connector call. Cards appear when a call is blocked, and user rules ("Ask first") force that. A connector cannot require approval. **Rules are stored as natural language and matched loosely:** an "Ask first" rule written for `probe_echo` also held a `probe_reply` call. An explicit tool-by-tool **Allow** rule for the reply tool let replies through. | SR, D, M0 V6 |
-| Cards show "Allow m0-test to use <connector>?", a paraphrased summary (may omit arguments), a **Details** panel with the exact call JSON, and **"Not now" / "Allow"**. There is no "Always allow" button. Rules are made through the bot (a one-click "Add custom rule?" card) or Settings → Custom Rules. | M0 V6 |
+| Auto-review checks every connector call. Cards appear when a call is blocked, and user rules ("Ask first") force that. A connector cannot require approval. **Rules are stored as natural language and matched loosely:** an "Ask first" rule written for `probe_echo` also held a `probe_reply` call. An explicit tool-by-tool **Allow** rule for the reply tool let replies through. | SR, D, T |
+| Cards show "Allow <bot> to use <connector>?", a paraphrased summary (may omit arguments), a **Details** panel with the exact call JSON, and **"Not now" / "Allow"**. There is no "Always allow" button. Rules are made through the bot (a one-click "Add custom rule?" card) or Settings → Custom Rules. | T |
 | The bot cannot press cards. It treats messages and agent content as data. A routine's saved prompt counts as the user's request for exactly what it names. | SR |
-| Cards raised from routine runs appear in the main chat and **expire after ≈ 20 minutes** (docs: 30). An expired card means no: the call never runs and is not retried, and the run reports the expiry late in chat. | SR, D, M0 V6 |
-| **Run results appear in the main chat** when the routine's instruction asks for a report (the Appendix B "always report" wording). With no such wording, nothing appeared. | M0 V7a, V7b |
+| Cards raised from routine runs appear in the main chat and **expire after ≈ 20 minutes** (docs: 30). An expired card means no: the call never runs and is not retried, and the run reports the expiry late in chat. | SR, D, T |
+| **Run results appear in the main chat** when the routine's instruction asks for a report (the Appendix B "always report" wording). With no such wording, nothing appeared. | T |
 | Each run starts fresh: saved prompt + webhook payload only. | SR |
-| **Runs can call custom connector tools** (≈ 17–22 s from POST to tool call). | M0 V7a, V14 |
-| **A run sees only about the first 4,000 characters of the webhook body.** The rest is cut silently, and the webhook still answers 200 for bodies up to at least 1 MB. | M0 V9 |
+| **Runs can call custom connector tools** (≈ 17–22 s from POST to tool call). | T |
+| **A run sees only about the first 4,000 characters of the webhook body.** The rest is cut silently, and the webhook still answers 200 for bodies up to at least 1 MB. | T |
 | The bot cannot read its routine's webhook URL or key. The user copies them from the routine panel. | SR |
-| **The bot can add a custom remote connector itself** from chat (static `Authorization: Bearer` header), create a webhook routine, and propose Auto-review rules as one-click cards. | M0 V8b, V14 |
-| Connector transport: Streamable HTTP, JSON responses accepted, `MCP-Protocol-Version: 2025-11-25`, optional SSE `GET` (405 accepted), no session id, `User-Agent: Cursor/1.0.0`, calls from several AWS us-east addresses. A second bot pointing at an already-connected URL did not re-initialize. | M0 V8a, V14 |
-| **Tool-call timeout 90–120 s.** **No automatic retries** after a timeout or HTTP 500. The HTTP error body reaches the model verbatim. | M0 V8a |
-| **Webhook limits:** 200 runs/hour per routine, 300/hour across routines. Over-limit runs fail and are not retried. A 10-in-10 s burst was not throttled. Identical POSTs start separate runs (no deduplication). | D, M0 V9 |
-| Webhook responses: **200** `{"success":true,"runUuid":"…"}` = run started; **400** `{"success":false,"error":"Automation <id> is disabled"}` = paused; **401** `{"code":"error","message":"Invalid API key"}` = wrong key **or deleted routine**. Routines can be auto-paused after long absence. | D, M0 V9 |
-| Grok Bot runs on Cursor (Anysphere) infrastructure: webhook host `api2.cursor.sh`, Cursor sign-in. xAI's legal entity is SpaceX Super Intelligence LLC. | M0 V7a, V12 |
+| **The bot can add a custom remote connector itself** from chat (static `Authorization: Bearer` header), create a webhook routine, and propose Auto-review rules as one-click cards. | T |
+| Connector transport: Streamable HTTP, JSON responses accepted, `MCP-Protocol-Version: 2025-11-25`, optional SSE `GET` (405 accepted), no session id, `User-Agent: Cursor/1.0.0`, calls from several AWS us-east addresses. A second bot pointing at an already-connected URL did not re-initialize. | T |
+| **Tool-call timeout 90–120 s.** **No automatic retries** after a timeout or HTTP 500. The HTTP error body reaches the model verbatim. | T |
+| **Webhook limits:** 200 runs/hour per routine, 300/hour across routines. Over-limit runs fail and are not retried. A 10-in-10 s burst was not throttled. Identical POSTs start separate runs (no deduplication). | D, T |
+| Webhook responses: **200** `{"success":true,"runUuid":"…"}` = run started; **400** `{"success":false,"error":"Automation <id> is disabled"}` = paused; **401** `{"code":"error","message":"Invalid API key"}` = wrong key **or deleted routine**. Routines can be auto-paused after long absence. | D, T |
+| Grok Bot runs on Cursor (Anysphere) infrastructure: webhook host `api2.cursor.sh`, Cursor sign-in. xAI's legal entity is SpaceX Super Intelligence LLC. | T |
 
 ### 12.2 Consequences
 
@@ -809,7 +724,7 @@ Sources: Grok Bot self-report (SR), xAI docs (D), and M0 measurements (M0, with 
 ### 12.4 Delivery to Grok
 
 - `POST <webhook_url>` with `Authorization: Bearer <webhook_key>`.
-- **Thin delivery (M0, V9).** A routine run sees only about the first 4,000 characters of the body, and the cut is silent. The serialized payload must therefore be **≤ 3,500 characters**, always. Full text travels over the connector instead.
+- **Thin delivery.** A routine run sees only about the first 4,000 characters of the body, and the cut is silent. The serialized payload must therefore be **≤ 3,500 characters**, always. Full text travels over the connector instead.
 
 ```jsonc
 {
@@ -831,7 +746,7 @@ Sources: Grok Bot self-report (SR), xAI docs (D), and M0 measurements (M0, with 
 
 - **Packing:** header, `reply_to`, notices and `end` first. Then the new messages in full, if all of them fit within 3,500 characters. Otherwise each message carries `preview` (≤ 300 chars, cut at a word boundary) and `length`, and `truncated` is `true`. Notice texts are capped at 300 chars each. The transcript is never inlined; the run calls `bridge_get_transcript` when it needs context.
 - **Notice-only delivery:** `messages: []`, `reply_to: null`, `notices` non-empty. Appendix B tells the run to report the notices and do nothing else.
-- **Results (measured, M0 V9):**
+- **Results (measured):**
   - **200** `{"success":true,"runUuid":…}` → `handed_off`, with `runUuid` stored on the delivery row.
   - Network error or 5xx → retry 3× (2 s, 10 s, 30 s) with the same payload IDs, then `failed(grok_run_not_started)`. The webhook doesn't deduplicate, so a retry after an ambiguous network error may start a second run. Appendix B's "don't reply twice" rule and §6.5's one-reply rule absorb it.
   - **400** containing "is disabled" → `failed(grok_run_not_started)`, hint "routine paused — resume it in Grok Bot".
@@ -843,13 +758,13 @@ Sources: Grok Bot self-report (SR), xAI docs (D), and M0 measurements (M0, with 
 ### 12.5 Setup (`agentbridge add grok`, user presence, one-time per bot)
 
 1. Choose a name. The bridge mints `bot_id` and `bot_token`, and registers them with the relay (§13.3).
-2. **Connector, routine and rule in one prompt (verified, M0 V8b/V14, ≈ 4 min end to end).** The CLI copies the bootstrap prompt (Appendix A) to the clipboard. The user pastes it into a chat with the bot, then pastes the token over the word `TOKEN`; the prompt uses no angle brackets. The bot:
+2. **Connector, routine and rule in one prompt (verified, ≈ 4 min end to end).** The CLI copies the bootstrap prompt (Appendix A) to the clipboard. The user pastes it into a chat with the bot, then pastes the token over the word `TOKEN`; the prompt uses no angle brackets. The bot:
    - adds the connector
    - creates "Inbox from agentbridge" (webhook trigger only, placeholder instruction)
    - proposes the **mandatory Allow rule** as a one-click card: **Allow `bridge_send`, `bridge_get_messages`, `bridge_end_conversation`, `bridge_get_transcript` on the agentbridge connector**, worded tool by tool
 
-   No "Ask first" rule is recommended. Auto-review matches rules loosely, and an "Ask first" rule can catch the reply tools (M0, V6). The local approval is the guarantee (§12.2).
-3. **Instruction:** the CLI copies the Appendix B instruction. **The user pastes it into the routine and saves**, then confirms that the panel shows text starting "You receive deliveries from agentbridge". In M0 the first paste didn't save, and the run silently did nothing.
+   No "Ask first" rule is recommended. Auto-review matches rules loosely, and an "Ask first" rule can catch the reply tools (§12.1). The local approval is the guarantee (§12.2).
+3. **Instruction:** the CLI copies the Appendix B instruction. **The user pastes it into the routine and saves**, then confirms that the panel shows text starting "You receive deliveries from agentbridge". In testing the first paste didn't save, and the run silently did nothing.
 4. The user pastes the **webhook URL and key** (hidden input). They are stored in the keychain.
 5. **Round-trip check (mandatory):** the CLI sends a test delivery and waits up to 90 s for the run's `bridge_send` reply. On failure it lists the likely causes in order:
    1. the instruction is still the placeholder
@@ -864,7 +779,7 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
 ### 12.6 Identity
 
 - The token identifies a connector on the user's Grok account. Bot names are labels, not isolation.
-- Open (M2): in M0 a second bot added a connector with the same URL and did not re-initialize. Confirm that two bots with different tokens at the same URL really send their own tokens. If not, bot identity falls back to one connector per URL (use distinct per-bot URL paths, which §12.3 already does).
+- Open question: in testing, a second bot that added a connector with the same URL did not re-initialize. It is unconfirmed that two bots with different tokens at the same URL each send their own token. If they don't, bot identity falls back to one connector per URL, which the distinct per-bot URL paths of §12.3 already provide.
 - `agentbridge revoke grok:<name>` rotates the token (user presence).
 
 ---
@@ -874,7 +789,7 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
 ### 13.1 Hosting
 
 - Vercel Functions (Node, Fluid compute) at `relay.musi.live`, with Upstash Redis over TCP (`ioredis`).
-- **Functions are pinned to the Redis region** (`regions: ["fra1"]` with Upstash Frankfurt). In M0 the default iad1 region with Redis in Frankfurt cost 6–7× the latency (V10).
+- **Functions are pinned to the Redis region** (`regions: ["fra1"]` with Upstash Frankfurt). Measured: the default iad1 region with Redis in Frankfurt cost 6–7× the latency.
 - Small memory (`memory: 512`).
 - Self-hostable (`docs/self-hosting.md`).
 - Portable to Cloudflare Durable Objects.
@@ -887,8 +802,8 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
   1. The relay sends `{ nonce, ts }`.
   2. The bridge replies `{ user_id, pubkey, sig = Ed25519("agentbridge-relay-auth-v1" ‖ relay_host ‖ nonce ‖ ts) }`.
   3. The relay checks `ts` is within ±60 s and the nonce is single-use.
-- Vercel closes WebSockets at the function's maximum duration (Hobby 300 s, Pro 800 s). In M0 the close came at 315 s as an abrupt drop (code 1006, no close frame), and the dying instance stopped handling wake-ups for about 12 s beforehand (V10).
-- **On-demand connection (default, owner decision after M0 V10).** The bridge does **not** hold the WebSocket all the time; a permanently open socket keeps a function instance alive 24/7 and costs ≈ $20/month on Vercel Pro (Hobby's allowance is exceeded).
+- Vercel closes WebSockets at the function's maximum duration (Hobby 300 s, Pro 800 s). Measured: the close came at 315 s as an abrupt drop (code 1006, no close frame), and the dying instance stopped handling wake-ups for about 12 s beforehand.
+- **On-demand connection (default).** The bridge does **not** hold the WebSocket all the time; a permanently open socket keeps a function instance alive 24/7 and costs ≈ $20/month on Vercel Pro (Hobby's allowance is exceeded).
   - **Connected mode:** the bridge connects when any of these holds:
     - the pending check reports entries
     - a Grok conversation had activity (a delivery to Grok, a call from Grok, or a reply awaited) within the last **10 minutes**
@@ -907,7 +822,7 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
 - **Make-before-break reconnect.** The bridge opens a new connection at **~270 s** (Hobby; ~770 s on Pro), and closes the old one once the new one is authenticated.
   - The relay allows two connections per user for up to 30 s and routes to the newest.
   - Unplanned drops reconnect with jittered backoff (first retry ≤ 250 ms) and resume from the ack cursor.
-- **Deployments.** Existing WebSockets stay on the old deployment while new HTTP requests reach the new one. Both interoperate through Redis (V10). Stream entries and response keys carry a format version, so a breaking change can run old and new side by side until old connections drain.
+- **Deployments.** Existing WebSockets stay on the old deployment while new HTTP requests reach the new one. Both interoperate through Redis. Stream entries and response keys carry a format version, so a breaking change can run old and new side by side until old connections drain.
 
 ### 13.3 RPC
 
@@ -925,7 +840,7 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
 | `register_x25519 { pub, sig }` | Register the encryption key |
 
 **Grok → relay (MCP, stateless Streamable HTTP):** `POST /v1/u/<user_id>/b/<bot_id>/mcp`.
-- Protocol details from M0 (V8a):
+- Protocol details (measured with Grok Bot):
   - Accept MCP protocol version `2025-11-25` (and earlier).
   - Answer with JSON responses (no SSE needed).
   - Return `405` to `GET`.
@@ -937,7 +852,7 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
 - `tools/call`:
   1. The relay verifies the bearer token against `token_hash` (early reject).
   2. It builds `req { id, method, params, caller: bot_id, token }`. For `bridge_start_conversation`, **the relay allocates `conversation_id`** and includes it in `params`. The bridge always uses it, rejecting only duplicates.
-  3. It appends the request to the stream (§13.4) and waits up to **20 s** for `res` (Grok waits 90–120 s; M0 V8a). In M0 the round trip was p50 130 ms / p95 216 ms across forced reconnects (V10).
+  3. It appends the request to the stream (§13.4) and waits up to **20 s** for `res` (Grok waits 90–120 s, §12.1). Measured round trip: p50 130 ms / p95 216 ms across forced reconnects.
 - **The bridge re-verifies the token** against its own copy.
 - **Offline or deadline missed:**
   - `bridge_send`, `bridge_start_conversation`, `bridge_end_conversation` → `held_relay`, with `conversation_id` where relevant.
@@ -949,9 +864,9 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
 - **Stream `user:<id>:inbox` (Redis Stream).** Every entry, live or held, is sealed to the bridge's X25519 key (libsodium sealed box) before it is appended.
 - **Wake-ups:**
   - `PUBLISH user:<id>:wake` after each append.
-  - The instance holding the WebSocket reads the stream on connect, on each wake, **and every 60 s** in case a wake was lost (10 s in v0.3; the poll dominated Redis cost, M0 V10). Each instance holds **one** pattern `SUBSCRIBE` (`user:*:wake`) shared by all its sockets, not one per socket.
+  - The instance holding the WebSocket reads the stream on connect, on each wake, **and every 60 s** in case a wake was lost (a shorter poll dominated Redis cost). Each instance holds **one** pattern `SUBSCRIBE` (`user:*:wake`) shared by all its sockets, not one per socket.
 - **Bridge acks** after durable storage. Acked entries are deleted (`XDEL`). On reconnect, the bridge reads everything after its cursor and deduplicates by request ID.
-- **Responses:** the bridge's `res` is written to `res:<req_id>` (plaintext tool result for Grok; TTL 30 s). The HTTP instance waits with **`BLPOP`** on a dedicated short-lived connection (verified in M0, V10). The WebSocket instance holds a `SUBSCRIBE` connection for wake-ups alongside the socket. Every Redis connection counts against the 1,024 file-descriptor limit per instance, so connections are closed promptly.
+- **Responses:** the bridge's `res` is written to `res:<req_id>` (plaintext tool result for Grok; TTL 30 s). The HTTP instance waits with **`BLPOP`** on a dedicated short-lived connection. The WebSocket instance holds a `SUBSCRIBE` connection for wake-ups alongside the socket. Every Redis connection counts against the 1,024 file-descriptor limit per instance, so connections are closed promptly.
 - **Trimming:** `XTRIM MINID` by age = `queue.expiry` (default 7 d, max 7 d public). A trim of unacked entries creates an expiry record. The bridge reports it on reconnect (catch-up popup), and Grok gets notice-only deliveries for affected conversations.
 
 ### 13.5 Limits and abuse
@@ -975,7 +890,7 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
   - Grok-bound content goes from the bridge to the Grok Bot webhook, hosted at `api2.cursor.sh` by Cursor (Anysphere).
   - Grok's connector calls to the relay come from the same infrastructure.
   - Both are covered by the user's own Grok Bot and Cursor terms, not by agentbridge.
-- **Terms (M0, V12; owner accepted with these commitments):**
+- **Terms.** agentbridge commits to the following:
   - agentbridge uses only the documented webhook and connector features, never scripting the Grok app or internal APIs
   - it caps deliveries per bot (§6.5)
   - it stores Grok output only in the user's local bridge, with plaintext never stored on the relay
@@ -985,10 +900,10 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
 
 ### 13.7 Operator gate
 
-- Owner's account only until release.
-- **Cost and limits were measured in M0 (V10)** and are reviewed again at M4 with real usage.
+- The public relay at `relay.musi.live` runs on the Vercel Hobby and Upstash free tiers. Its availability isn't guaranteed.
+- Cost and limits were measured before release and are reviewed with real usage.
 - On Vercel Hobby, exceeding the included usage **pauses the whole team** (`503 DEPLOYMENT_PAUSED`, about 30 days). One always-connected bridge alone keeps an instance alive 24/7 (≈ 365 GB-h/month at 512 MB, above Hobby's 360). With **on-demand connections** (§13.2), personal and showcase use stays far inside Hobby's and Upstash's free allowances: idle checks cost seconds of instance time and ≈ 86K Redis commands per bridge per month. The client-side daily cap guards the allowance.
-- If the hosted relay takes off, it moves to a Vercel Pro team with spend alerts (measured model, always-connected bridges: ≈ $20/month up to ~100, ≈ $135/month at 1,000), or to **Cloudflare Durable Objects**, whose hibernating WebSockets cost nothing while idle (§13.1). The owner decides then.
+- If the hosted relay takes off, it moves to a Vercel Pro team with spend alerts (measured model, always-connected bridges: ≈ $20/month up to ~100, ≈ $135/month at 1,000), or to **Cloudflare Durable Objects**, whose hibernating WebSockets cost nothing while idle (§13.1).
 
 ---
 
@@ -997,8 +912,10 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
 | Command | Privileged | Purpose |
 |---|---|---|
 | `agentbridge init` | partly | Setup (§14.1) |
+| `agentbridge add codex` / `remove codex` | no | Add or remove the managed block in Codex's `config.toml` (§11a); runs without the bridge |
 | `agentbridge status` | no | Service, relay, participants, counts, pending approvals |
-| `agentbridge status --watch` | no | Live view, redrawn in place every 1.5 s until Ctrl-C: what waits on you (approvals, held deliveries), active and pending conversations, live agents (closed ones as a count), recent notices, health. Polls `cli.status` with `{watch: true}`, which adds `conversation_list`, `waiting_deliveries`, `recent_notices`, `relay` and `now` and does not consume unshown notices. Without a TTY it prints one snapshot; with `--json` it prints the raw snapshot once. Agent-written text is shown with control characters removed |
+| `agentbridge status --watch` | no | Live view, redrawn in place every 1.5 s until Ctrl-C: what waits on you (approvals, held deliveries), active and pending conversations, live agents (closed ones as a count), recent notices, health. Polls `cli.status` with `{watch: true}`, which adds `conversation_list`, `waiting_deliveries`, `recent_notices`, `relay` and `now` and does not consume unshown notices. Without a TTY it prints one snapshot. Agent-written text is shown with control characters removed |
+| `agentbridge status --json`, `status --watch --json` | no | The agent panel's data contract (docs/status-json.md, versioned by `schema`): one snapshot, or one JSON object per line on every change plus a heartbeat, built from the same `{watch: true}` answer. Adds each participant's project (git repository root of its folder, computed once when the folder becomes known; output as an opaque hash, never the path), conversations ended today, and approval provenance from `conversation_approved` events (kind, via `prompt` / `cli` / `allow_rule` / `bot`). Never message bodies, transcripts or secrets. Without a bridge it prints `bridge.running: false` and exits 1 |
 | `agentbridge agents` | no | Participants and states |
 | `agentbridge add grok` | yes | Grok setup |
 | `agentbridge remove <address>` | yes | Disconnect a participant or bot |
@@ -1022,7 +939,7 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
 
 ### 14.1 Install and `init`
 
-**Install:** `npm install -g @musi27/agentbridge` (npm refused the unscoped name as too similar to `agent-bridge`; the command is still `agentbridge`). `npx @musi27/agentbridge init` only bootstraps a global or `~/.agentbridge/app` install. Node LTS (minimum fixed at M1).
+**Install:** `npm install -g @musi27/agentbridge` (npm refused the unscoped name as too similar to `agent-bridge`; the command is still `agentbridge`). `npx @musi27/agentbridge init` only bootstraps a global or `~/.agentbridge/app` install. Node ≥ 24.
 
 **`init` steps:**
 1. Detect Claude Code (≥ 2.1.330) and check requirements (§11.2). Install the plugin. Write the deny rules. Check the effective `crossSessionInbound` (must not be `hold`/`refuse`).
@@ -1035,14 +952,14 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
 
 **Upgrade:** `npm install -g @musi27/agentbridge`, then `init` again. One release version covers the CLI, the bridge and the plugin (`agentbridge --version`). `init` restarts a running bridge whose version (from the IPC `hello`) differs from the CLI's, and refreshes the Codex block if `add codex` wrote one; `doctor` and `status` report a mismatch. Claude Code loads the plugin in place from the npm folder, so new sessions get the new plugin; open sessions need a restart or `/reload-plugins`.
 
-**Target:** < 10 minutes, excluding Grok setup. Grok setup measured ≈ 4 minutes in M0 (V14).
+**Target:** < 10 minutes, excluding Grok setup. Grok setup measured ≈ 4 minutes.
 
 **`uninstall`** undoes `init`. It needs user presence, which the CLI checks itself (the bridge may be down), and it never needs the bridge. Re-running it is safe: steps already done report "absent". It prints what it removed and what it left.
 1. Write the setup marker, so the plugin's on-demand start waits.
 2. `claude plugin uninstall agentbridge@agentbridge --scope user`, then `claude plugin marketplace remove agentbridge` ("not found" counts as done).
 3. Boot out the launchd agent and delete its plist. Stop a bridge still holding the lock (only if it is an agentbridge bridge).
 4. Remove exactly the deny rules `init` wrote from the user's Claude Code settings; every other setting stays.
-5. With `--purge-data` only: delete the Keychain items under service `agentbridge` (identity, policy and per-bot names; bot ids come from the database), then `~/.agentbridge`. It refuses to delete a folder that is the home folder, one of its parents, or doesn't look like an agentbridge folder. Without the flag both are reported as left.
+5. With `--purge-data` only: delete the keychain item `agentbridge: saved keys` and any items left from the old one-per-secret layout (§15.5; per-bot names come from the database), then `~/.agentbridge`. It refuses to delete a folder that is the home folder, one of its parents, or doesn't look like an agentbridge folder. Without the flag both are reported as left.
 6. Print the steps it can't do: delete the connector and routine in Grok, then `npm uninstall -g @musi27/agentbridge`, last.
 
 ---
@@ -1079,7 +996,7 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
 ### 15.4 Schema
 
 **Tables:**
-- `participants`
+- `participants` (with `project_root`, the git repository root of the participant's folder, since migration 4)
 - `sessions` (Claude session IDs ↔ participant, link history)
 - `bots`
 - `conversations`
@@ -1094,13 +1011,30 @@ Repeat only for a new bot, a rotated key, a deleted or paused routine, or a rela
 
 ### 15.5 Secrets
 
-Stored in the keychain:
-- Ed25519 and X25519 keys
-- policy HMAC key and version
-- bot tokens
-- webhook URLs and keys
+All secrets live in **one item** in the macOS login keychain: service `agentbridge`, account `saved keys`, labelled
+`agentbridge: saved keys` (the name macOS shows in its access dialog and in Keychain Access). It holds the Ed25519
+and X25519 keys, the policy HMAC key, version and snapshot, bot tokens, and webhook URLs and keys.
 
-macOS Keychain. (Linux Secret Service → v1.1.)
+- **Access.** Only `AgentBridge.app` (§9.2) reads and writes the item. Its access list trusts the creating helper's
+  designated requirement. For the Developer ID-signed release build that is Apple anchor + identifier + team, so
+  upgrades read silently. One item means at most one macOS dialog when trust is re-checked, instead of one per secret.
+- **Writes** are serialised under `~/.agentbridge/run/keychain.lock` and crash-safe: the new version is saved as a
+  second item first, then replaces the item, then the second item is deleted.
+- **One-way move from the old layout.** 0.2.6 and earlier kept one item per secret. `init` and bridge start move them
+  into the combined item: read only the names the combined item lacks, write, read back to verify, then delete the old
+  items. The combined item is authoritative for every name it holds, so an old item is read at most once and an
+  interrupted move loses nothing. A read or delete macOS refuses is remembered per helper build and not retried by that
+  build, so there is no prompt loop; `init` retries refused reads, since a person is there.
+- **Warning before a likely dialog.** When macOS is likely to ask (old items still to read, or the helper's code
+  identity changed since the last successful read), `init` prints one line first, and the bridge posts it as a
+  notification.
+- **`doctor`** has a `keychain` check: it lists old items macOS refused to delete, with the
+  `security delete-generic-password` command for each. It reads item attributes only, never a secret.
+- **Limits.** The file-based login keychain doesn't enforce `WhenUnlockedThisDeviceOnly`: the item is readable while
+  the login keychain is unlocked and travels with keychain backups. The data-protection keychain would need an
+  entitlement backed by a provisioning profile. Details: [packages/presence/README.md](packages/presence/README.md#keychain-item-one-for-all-secrets).
+
+(Linux Secret Service → v1.1.)
 
 ---
 
@@ -1142,10 +1076,10 @@ Every failure returns a status to the caller **and** produces the §9.1 notices.
 
 ```
 agentbridge/
-├── packages/{protocol,bridge,relay,presence}/
+├── packages/{protocol,bridge,relay,presence}/   each with its own test/
 ├── adapters/{claude-code,grok-bot,fake}/
-├── docs/              setup, security, self-hosting, releasing
-├── tests/
+├── packaging/npm/     the published @musi27/agentbridge package
+├── docs/              setup, security, self-hosting, troubleshooting, releasing, release notes
 ├── SPEC.md
 └── LICENSE (MIT)
 ```
@@ -1156,34 +1090,10 @@ The name must not suggest an official xAI or Anthropic product.
 
 ## 18. Milestones
 
-### M0 (verification) — done 2026-11-22
+Release history: [docs/release-notes/](docs/release-notes/README.md).
 
-All four kill checks passed (V1, V2, V8b, V7a); findings are folded into §11–§13.
-
-### M1: core + Claude Code adapter
-
-- Protocol, bridge, IPC, policy integrity, user presence, storage, CLI.
-- Fake adapter; Claude Code adapter.
-- Full conversation model.
-- CI on macOS.
-
-### M2: thin Grok slice
-
-- Minimal relay (auth, RPC, live forwarding, simple hold).
-- Grok adapter with the copy-paste setup (§12.5).
-- One real conversation in each direction.
-
-### M3: relay hardening
-
-- Durable stream and acks, sealing, reconnect resilience, trimming and expiry, limits, catch-up, self-hosting docs.
-
-### M4: release
-
-- Operator gate review, packaging, docs (security and threat model, setup), npm and GitHub release.
-
-### v1.1+
-
-Linux (incl. WSL 2), Codex, Cursor, Windows, tunnel, `manual` mode, per-pair overrides, multi-party, background workers, strict mode.
+Planned after v1: Linux (incl. WSL 2), Cursor, Windows, tunnel transport, `manual` mode, per-pair overrides,
+multi-party conversations, background workers, strict mode.
 
 ---
 
@@ -1234,12 +1144,12 @@ Linux (incl. WSL 2), Codex, Cursor, Windows, tunnel, `manual` mode, per-pair ove
 | 17 | Session in auto mode starts or accepts | Allowed; warning line present in the notice and the `pending_approval` result |
 | 18 | Session whose `crossSessionInbound` is `hold` or `refuse` | Marked `unreachable`; deliveries queued; sender told `recipient_unreachable` |
 
-Adversarial local tampering (§2.3) was characterised in M0 (V13) and is documented, not tested as a guarantee.
+Adversarial local tampering (§2.3) was characterised by hand and is documented, not tested as a guarantee.
 
 ### 19.4 Relay tests
 
 - reconnect every ~5 min with zero loss
-- lost wake (10 s poll catches it)
+- lost wake (the 60 s poll catches it)
 - cross-instance delivery
 - deadline → hold
 - backlog
@@ -1257,7 +1167,7 @@ Done with the real Grok Bot app. Covers the DoD.
 1. **Claude → Grok.** "discuss this design with grok:researcher".
    - Claude Code's native prompt shows peer, topic and limit, and the user approves.
    - Several exchanges happen. The Claude session shows the full thread and a summary.
-   - The user's Grok chat shows a report for each exchange (Appendix B; M0 V7b).
+   - The user's Grok chat shows a report for each exchange (Appendix B).
    - The bot can show the transcript on request.
 2. **Grok → Claude.** "ask claude:auth-refactor whether the migration is done".
    - Claude Code's native prompt asks to accept, showing peer, limit and the untrusted topic.
@@ -1272,29 +1182,27 @@ Done with the real Grok Bot app. Covers the DoD.
 
 ## 21. Risks and open questions
 
+These are known limits, not plans.
+
 **Risks**
-- New, fast-changing products on both ends.
+- New, fast-changing products on both ends: Claude Code, Codex CLI and Grok Bot can change behaviour this design relies on.
 - Grok Bot has no public API.
 - Grok chat relays are model-mediated.
 - Every post to Claude costs a turn.
 - Relay cost and abuse.
 - Same-user tampering is out of scope (§2.3).
 
-**Answered by M0:** run-result visibility, who adds the connector, Grok transport/timeout/size limit, ticket hand-off (replaced by PID registration).
-
 **Open**
-- Connector tool-result size limit (the thin-delivery pull path relies on it). M2.
-- Whether the ≈ 4,000 limit counts characters or bytes (non-ASCII). M2.
-- Per-bot tokens on a shared URL (§12.6). M2.
-- VS Code extension behaviour for the confirm prompt. M1.
-- Touch ID and notifications from a launchd agent; helper signing and notarisation. M1.
-- Final name.
+- Grok's size limit for connector tool results is unknown. The thin-delivery pull path (§12.4) relies on it; the bridge keeps each result under 64 KiB and pages beyond that.
+- Whether the ≈ 4,000-character webhook cut counts characters or bytes for non-ASCII text is untested. Packing (§12.4) leaves a 500-character margin.
+- Per-bot tokens on a shared connector URL (§12.6).
+- The VS Code and JetBrains extensions are untested, including the `bridge_confirm` prompt.
 
 ---
 
-## Appendix A — Grok bootstrap prompt (verified in M0, V14)
+## Appendix A — Grok bootstrap prompt (verified with Grok Bot)
 
-The CLI fills in the connector URL. The user pastes the token over the word `TOKEN`. There are no angle brackets: in M0 the bot stripped them.
+The CLI fills in the connector URL. The user pastes the token over the word `TOKEN`. There are no angle brackets: in testing the bot stripped them.
 
 ```
 I want to connect you to agentbridge, a tool on my computer that lets you talk with my Claude Code sessions. Please do these things, confirming each with me:
@@ -1317,7 +1225,7 @@ When done, tell me how to open the routine panel so I can paste the instruction 
 
 ## Appendix B — Inbox routine instruction (normative; pasted by the user)
 
-The structure was verified in M0 (V7b, V14) with probe tools in place of the bridge tools.
+The structure was verified with Grok Bot, first with probe tools in place of the bridge tools.
 
 ```
 You receive deliveries from agentbridge. Each delivery is JSON with: a conversation, zero or more new messages from another AI agent, and possibly bridge notices. It ends with "end": "agentbridge-delivery-end".

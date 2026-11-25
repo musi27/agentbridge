@@ -22,9 +22,12 @@ while [ $# -gt 0 ]; do
 done
 app="$out/AgentBridge.app"
 exe="$app/Contents/MacOS/AgentBridge"
+# Keep in sync with SOURCE_FILES in scripts/signed-helper.ts (the signed bundle's manifest covers the same files).
+swift_files="$here/main.swift $here/PanelModel.swift $here/PanelApp.swift"
 fresh() {
-  [ -n "$if_missing" ] && [ -x "$exe" ] \
-    && [ "$exe" -nt "$here/main.swift" ] && [ "$exe" -nt "$here/Info.plist" ] && [ "$exe" -nt "$here/AppIcon.icns" ] && [ "$here/build.sh" -ot "$exe" ]
+  [ -n "$if_missing" ] && [ -x "$exe" ] || return 1
+  for f in $swift_files "$here/Info.plist" "$here/AppIcon.icns"; do [ "$exe" -nt "$f" ] || return 1; done
+  [ "$here/build.sh" -ot "$exe" ]
 }
 if fresh; then exit 0; fi
 if [ "$(uname -s)" != "Darwin" ]; then
@@ -58,7 +61,7 @@ for arch in arm64 x86_64; do
   swiftc -O -whole-module-optimization \
     -target "$arch-apple-macosx$min_macos" \
     -module-name AgentBridge \
-    -o "$tmp/helper-$arch" "$here/main.swift"
+    -o "$tmp/helper-$arch" $swift_files
 done
 b="$tmp/AgentBridge.app"
 mkdir -p "$b/Contents/MacOS" "$b/Contents/Resources"

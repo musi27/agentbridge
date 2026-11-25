@@ -134,8 +134,8 @@ test('status --watch over ipc: one read-only snapshot with conversations; notice
     assert.match(text, /claude:alice ↔ claude:bob {3}\(invite (pending|queued)\)\n {3}"review please"/);
     assert.doesNotMatch(text, /\u001b/);
     const json: string[] = [];
-    assert.equal(await main(['status', '--watch', '--json', '--home', h.root], (s) => json.push(s), () => {}), 0);
-    assert.ok(Array.isArray((JSON.parse(json.join('\n')) as { conversation_list: unknown[] }).conversation_list));
+    assert.equal(await main(['status', '--json', '--home', h.root], (s) => json.push(s), () => {}), 0);
+    assert.equal((JSON.parse(json.join('\n')) as { conversations: unknown[] }).conversations.length, 1);
     assert.equal(await main(['status', '--frobnicate', '--home', h.root], () => {}, () => {}), 2);
     a.close(); b.close();
   } finally { await h.stop(); cleanup(h); }

@@ -2,7 +2,7 @@
   "name": "@agentbridge/bridge",
   "version": "0.1.0",
   "private": true,
-  "description": "agentbridge bridge service core: storage, conversation engine, approvals, policy, IPC, delivery, CLI (SPEC v0.4)",
+  "description": "agentbridge bridge service core: storage, conversation engine, approvals, policy, IPC, delivery, CLI (SPEC)",
   "type": "module",
   "bin": {
     "agentbridge": "./dist/cli/main.js"

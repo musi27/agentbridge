@@ -14,6 +14,7 @@
 // Keychain service is always "agentbridge"; "service" may only name a throwaway test service
 // "agentbridge.test.<suffix>", so this trusted binary cannot be used as an oracle for other items.
 //   version          {}                                         -> {"ok":true,"version":String,"protocol":1}
+//   panel            argv options, no stdin request: the agent panel menu-bar app (long-running; see PanelApp.swift)
 // Errors: {"ok":false,"error":"bad_request"|"unknown_subcommand"|"keychain","detail":String,"os_status"?:Int}
 // LAError -> result-code mapping lives in the Node wrapper (src/protocol.ts), not here.
 import Foundation
@@ -165,6 +166,13 @@ func keychainDelete(_ req: [String: Any]) -> Never {
 }
 
 // MARK: main
+
+// `panel` is the one long-running subcommand: the agent panel's menu-bar app (PanelApp.swift) or, with --print-model,
+// its view model as JSON. It takes argv options instead of a stdin request and is the only path that starts AppKit;
+// every other subcommand below keeps the one-request, one-response protocol unchanged.
+if CommandLine.arguments.count >= 2 && CommandLine.arguments[1] == "panel" {
+  runPanel(Array(CommandLine.arguments.dropFirst(2)))
+}
 
 let args = CommandLine.arguments
 guard args.count == 2 else { fail("bad_request", "usage: AgentBridge <subcommand> < request.json", exitCode: 2) }

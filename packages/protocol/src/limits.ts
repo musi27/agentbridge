@@ -1,4 +1,4 @@
-// Numeric limits from SPEC v0.4. Change them here only.
+// Numeric limits from SPEC. Change them here only.
 export const LIMITS = {
   topicChars: 120,
   nameChars: 64,

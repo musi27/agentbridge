@@ -2,7 +2,7 @@
 // because the bridge may not be running), safe to re-run, and never depends on the bridge. Every external effect goes
 // through UninstallDeps so tests run against temp dirs with fake launchctl, claude and keychain.
 //
-// Order: presence → setup marker (blocks on-demand starts) → plugin + marketplace → launchd agent → a manually started
+// Order: presence → setup marker (blocks on-demand starts) → plugin + marketplace → launchd agent → menu-bar panel agent → a manually started
 // bridge → deny rules → (--purge-data) Keychain items, then the data folder → Grok-side and npm steps for the user.
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { basename, resolve, sep } from 'node:path';
@@ -18,6 +18,8 @@ export interface UninstallDeps {
   presence: PresenceChecker;
   /** The launchd login agent: uninstall = bootout + delete the plist; both are no-ops when absent. */
   service: { status(): Promise<'running' | 'stopped' | 'not_installed'>; uninstall(): Promise<void>; readonly plistPath: string };
+  /** The menu-bar panel's login item (live.musi.agentbridge.panel): always removed, same shape as `service`. */
+  panel?: { status(): Promise<'running' | 'stopped' | 'not_installed'>; uninstall(): Promise<void>; readonly plistPath: string };
   claude: ClaudeRunner;
   /** Claude Code user settings file holding the deny rules (tests: a temp file). */
   claudeSettingsPath: string;
@@ -102,6 +104,17 @@ export async function runUninstall(deps: UninstallDeps, o: UninstallOptions = {}
       step(before === 'not_installed' ? { id: 'launchd', status: 'absent', detail: `launchd agent (${deps.service.plistPath} not present)` } : { id: 'launchd', status: 'removed', detail: `launchd agent and ${deps.service.plistPath}` });
     } catch (e) {
       step({ id: 'launchd', status: 'failed', detail: `launchd agent: ${(e as Error).message}`, fix: `launchctl bootout gui/$(id -u)/live.musi.agentbridge; rm ${deps.service.plistPath}` });
+    }
+
+    // 4b. the menu-bar panel's login agent (bootout quits the panel; the plist is deleted)
+    if (deps.panel) {
+      try {
+        const before = await deps.panel.status();
+        await deps.panel.uninstall();
+        step(before === 'not_installed' ? { id: 'panel', status: 'absent', detail: `menu-bar panel (${deps.panel.plistPath} not present)` } : { id: 'panel', status: 'removed', detail: `menu-bar panel and ${deps.panel.plistPath}` });
+      } catch (e) {
+        step({ id: 'panel', status: 'failed', detail: `menu-bar panel: ${(e as Error).message}`, fix: `launchctl bootout gui/$(id -u)/live.musi.agentbridge.panel; rm ${deps.panel.plistPath}` });
+      }
     }
 
     // 5. a bridge still holding the lock (started by hand or by the plugin, or the launchd one still exiting)

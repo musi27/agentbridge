@@ -2,7 +2,7 @@
   "name": "@agentbridge/relay",
   "version": "0.4.0",
   "private": true,
-  "description": "agentbridge relay (SPEC v0.4 §13): Grok MCP endpoint, bridge WebSocket, Redis stream; plus the bridge-side relay client",
+  "description": "agentbridge relay (SPEC §13): Grok MCP endpoint, bridge WebSocket, Redis stream; plus the bridge-side relay client",
   "type": "module",
   "exports": {
     ".": { "agentbridge-source": "./src/index.ts", "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" },

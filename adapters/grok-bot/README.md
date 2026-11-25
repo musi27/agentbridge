@@ -1,6 +1,6 @@
 # @agentbridge/adapter-grok
 
-The Grok Bot adapter (SPEC v0.4 §12): one webhook POST to the bot's "Inbox from agentbridge" routine per bridge
+The Grok Bot adapter (SPEC §12): one webhook POST to the bot's "Inbox from agentbridge" routine per bridge
 delivery. It implements the protocol `Adapter` interface and never touches storage or policy.
 
 ## What it does

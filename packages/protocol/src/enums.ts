@@ -1,4 +1,4 @@
-// Single source of truth for every enum in SPEC v0.4 (§6, §7, §8.4, §16).
+// Single source of truth for every enum in SPEC (§6, §7, §8.4, §16).
 import { z } from 'zod';
 
 export const CONVERSATION_STATES = ['pending', 'active', 'ended'] as const;
