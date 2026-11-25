@@ -6,7 +6,7 @@ macOS platform layer for the bridge. It implements the interfaces in
 | Interface | Class | SPEC |
 |---|---|---|
 | `PresenceChecker` | `MacPresenceChecker` — LocalAuthentication `.deviceOwnerAuthentication` (Touch ID, falling back to the password) | §9.2 |
-| `SecretStore` | `MacKeychainStore` (login keychain), `InMemorySecretStore` (tests) | §15.5 |
+| `SecretStore` | `MacKeychainStore` (login keychain, one item for all secrets), `InMemorySecretStore` (tests) | §15.5 |
 | `Notifier` | `OsascriptNotifier` — `osascript display notification` (also from the launchd agent) | §9.1 |
 | `ServiceManager` | `LaunchdServiceManager` — `~/Library/LaunchAgents/live.musi.agentbridge.plist` | §14.1 |
 
@@ -106,31 +106,70 @@ then SIGKILL after another 2 s.
 `presenceMessage()` turns each result into a distinct CLI message. Presence checks are
 serialised, so only one OS dialog shows at a time.
 
-**Keychain items:** generic passwords; service `agentbridge`; account = the secret name
-(`SECRET_NAMES`). They live in the **legacy file-based login keychain**. The data-protection
-keychain was tested and is not available: `SecItemAdd` with `kSecUseDataProtectionKeychain`
-fails with −34018 "A required entitlement isn't present" for an ad-hoc binary, and fixing that
-needs a keychain-access-groups entitlement backed by a provisioning profile and Team ID. The
-helper still sets `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, but **the file-based keychain
-does not enforce it**. Items are readable whenever the login keychain is unlocked (normally the
-whole login session) and travel with keychain backups. It is recorded only for a later move to
-the data-protection keychain.
+### Keychain item: one for all secrets
+
+`MacKeychainStore` keeps every secret (`SECRET_NAMES`) in a single
+generic password: service `agentbridge`, account `saved keys`, value a JSON map
+`{"agentbridge_keys":1,"gen":<n>,"secrets":{name: value}}`. The helper labels it `agentbridge: saved keys`, and that
+label is the name macOS shows in its access dialog ("AgentBridge wants to use your confidential information stored in
+"agentbridge: saved keys" in your keychain") and in Keychain Access: the default access list created with the item
+carries the label as its description, the text security dialogs use (`security dump-keychain -a` shows it). One item
+means at most one dialog when macOS re-checks trust (a new signing team, an ad-hoc build), instead of one per secret.
+The combining is done in TypeScript; the helper protocol is unchanged.
+
+The item lives in the **legacy file-based login keychain**. The data-protection keychain was tested and is not
+available: `SecItemAdd` with `kSecUseDataProtectionKeychain` fails with −34018 "A required entitlement isn't present"
+for an ad-hoc binary, and fixing that needs a keychain-access-groups entitlement backed by a provisioning profile and
+Team ID. The helper still sets `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, but **the file-based keychain does not
+enforce it**. The item is readable whenever the login keychain is unlocked (normally the whole login session) and
+travels with keychain backups. It is recorded only for a later move to the data-protection keychain.
+
+**Writes are serialised and crash-safe.** The bridge service and CLI processes (init, uninstall) both write, so every
+write is a read-modify-write under a lock file, `<agentbridge home>/run/keychain.lock` (O_EXCL; a lock whose process is
+gone, or older than 15 minutes, is taken over). `keychain-set` is delete-then-add (below), so a crash between the two
+would lose the item. Each write therefore saves the new version as a second item first (`saved keys (update in
+progress)`), then replaces `saved keys`, then deletes the second item. Whoever next takes the lock finds a leftover
+second item and finishes the write with it when its generation number is higher. A reader that finds `saved keys`
+missing (mid-write) waits for the lock.
+
+**Moving from one item per secret (0.2.6 and earlier).** Those releases saved each secret as its own item (account =
+the secret name: identity keys, policy key, version and snapshot, three per Grok bot). `prepare()` (run by `init` and
+at bridge start, before any read) reads them all, writes the combined item, reads it back to verify, and only then
+deletes them. Rule: **the combined item is authoritative for every name it holds; an old item only fills a name it
+lacks.** So a move interrupted anywhere loses nothing, and running it again is harmless. `get` also falls back to an
+old item for a missing name, and `delete` removes the old item too. Items the helper created read silently for it, and
+deleting an item never needs its access list, so for a 0.2.6 user (signed helper, items already allowed) the move shows
+no dialog. Items saved by an ad-hoc build (0.2.5 and earlier) ask once each, one last time. `init` only copies while an
+older bridge is still running (it may still read the old items); the new bridge deletes them when it starts.
+
+**Warning before a dialog.** `prepare()` prints one line first when macOS is likely to ask: old items are about to be
+read, or the combined item exists but the helper's code identity differs from the one recorded after the last
+successful read (`run/keychain-trust.json`: `team:<id>/<identifier>` for Developer ID, `cdhash:<hash>` for ad hoc,
+read with `codesign -d`). Existence is checked with `security find-generic-password` without `-g`, which reads
+attributes only: no dialog, no value. The helper cannot read without UI today, so this predicts from the recorded
+identity rather than asking the keychain. One false positive is known: 0.2.6 recorded no identity, so the first move
+after it warns although nothing asks. At bridge start the line is also posted as a notification, since launchd has no
+terminal.
 
 **`keychain-set` is delete-then-add**, never an in-place update. Each write gets a fresh ACL
 naming the helper and fresh attributes, and an item pre-created by another process (with an ACL
 trusting itself) cannot capture the secret. This is tested by pre-seeding a foreign item with
-`security add-generic-password`. The cost: the write is not atomic. A crash between delete and
-add loses the old value.
+`security add-generic-password`. The cost: the write is not atomic, hence the update item above.
 
 The item ACL trusts the designated requirement of the binary that created it. With an
 ad-hoc signature, that is the bundle's cdhash (the identifier is not part of it), so
-**after a change to the helper's code, Info.plist or icon, the first access to each item shows a
-macOS "AgentBridge wants to use your confidential information" prompt**. Moving from the bare
-`agentbridge-helper` into `AgentBridge.app` was one such change; a copy of the same build at
-another path is not. Release builds are Developer ID-signed: their requirement is Apple anchor +
-identifier + Team ID, so updates read silently after a one-time prompt per item when moving from
-ad hoc (see [docs/release-signing.md](../../docs/release-signing.md)). The dev build in `bin/`
-is still ad hoc, so running it against your real keychain prompts.
+**after a change to the helper's code, Info.plist or icon, the first read shows a
+macOS "AgentBridge wants to use your confidential information" prompt**. Release builds are Developer ID-signed: their
+requirement is Apple anchor + identifier + Team ID, so updates read silently (see
+[docs/release-signing.md](../../docs/release-signing.md)). The dev build in `bin/` is still ad hoc, so running it
+against your real keychain prompts.
+
+**Proof with a throwaway keychain** (owner's Mac, needs the Developer ID identity):
+`node --conditions=agentbridge-source packages/presence/scripts/keychain-proof.ts` builds probes of `main.swift` that
+use a throwaway keychain file, with dialogs disallowed, and checks the move, a read by a second Developer ID build,
+and a move killed after every helper call. `--show-dialog` ends by showing the real dialog (click Deny).
+
+### Notifications
 
 **Notifications:** title, body and subtitle are passed to `osascript` as argv items **after `--`**
 and read with `item N of argv`. The AppleScript source is a constant. Quotes, backslashes and
@@ -184,6 +223,9 @@ standalone download would need it ([docs/release-signing.md](../../docs/release-
 - AppleScript argv safety
 - keychain store against the real login keychain under a unique throwaway service, always cleaned
   up; skipped when `CI=true`
+- the one-item store against a fake keychain with per-item access lists (`test/fake-keychain.ts`): the move from one
+  item per secret, a move or write killed at every step, concurrent writers in one process and in separate processes,
+  and when the warning is printed
 
 Tests never touch `~/Library/LaunchAgents` or the `agentbridge` keychain service, and never pop a
 Touch ID dialog.

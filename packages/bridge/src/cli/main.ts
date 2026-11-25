@@ -288,6 +288,18 @@ export async function runService(home: string | undefined, print: Print): Promis
   const paths = resolvePaths(home);
   if (!existsSync(paths.root)) mkdirSync(paths.root, { recursive: true, mode: 0o700 });
   const platform = await loadPlatform(paths.root);
+  // keychain: before anything reads a secret, finish an interrupted write and move items from the old
+  // one-per-secret layout (verify, then delete them). Launchd has no terminal, so the warning is also a notification.
+  if (platform.secrets.prepare) {
+    const { knownSecretNames } = await import('../init/secret-names.ts');
+    try {
+      const r = await platform.secrets.prepare({
+        legacyNames: await knownSecretNames(paths.db),
+        notice: (l) => { print(`keychain: ${l}`); void platform.notifier.notify({ title: 'AgentBridge', body: l }).catch(() => {}); },
+      });
+      if (r.copied > 0 || r.removed > 0) print(`keychain: moved ${r.copied} saved keys into one item ("agentbridge: saved keys"); deleted ${r.removed} old items`);
+    } catch (e) { print(`keychain: ${(e as Error).message}`); }
+  }
   const launchd = new presence.LaunchdServiceManager();
   let relay: RelayRuntimeT | null = null;
   let svc: Awaited<ReturnType<typeof startBridge>>;
@@ -347,7 +359,7 @@ async function init(home: string | undefined, args: readonly string[], print: Pr
   const paths = resolvePaths(home);
   if (!existsSync(paths.root)) mkdirSync(paths.root, { recursive: true, mode: 0o700 });
   let secrets, checker;
-  try { secrets = await presence.createSecretStore(); checker = await presence.createPresenceChecker(); }
+  try { secrets = await presence.createSecretStore({ stateDir: paths.runDir }); checker = await presence.createPresenceChecker(); }
   catch (e) { print(`agentbridge init: ${(e as Error).message}`); return 1; }
   const report = await runInit(realInitDeps({ paths, secrets, presence: checker, service: new presence.LaunchdServiceManager(), startBridge: async () => { await startDetached(home, { duringSetup: true }); }, serviceFor: (environment) => new presence.LaunchdServiceManager({ environment: { ...environment, ...(home ? { AGENTBRIDGE_HOME: paths.root } : {}) } }), print }), opts);
   print(report.ok ? '\nagentbridge is set up.' : '\nSome steps need attention (see FAIL lines above); fix them and run agentbridge init again.');
@@ -373,7 +385,7 @@ async function uninstall(home: string | undefined, args: readonly string[], json
   try { checker = await presence.createPresenceChecker(); }
   catch (e) { print(`agentbridge uninstall: ${(e as Error).message}\nThe Touch ID helper is needed to confirm it is you. To remove agentbridge by hand, follow docs/troubleshooting.md ("Uninstall").`); return 1; }
   const out: string[] = [];
-  const report = await runUninstall(realUninstallDeps({ paths: resolvePaths(home), presence: checker, service: new presence.LaunchdServiceManager(), secrets: () => presence.createSecretStore(), print: json ? (l) => out.push(l) : print }), opts);
+  const report = await runUninstall(realUninstallDeps({ paths: resolvePaths(home), presence: checker, service: new presence.LaunchdServiceManager(), secrets: () => presence.createSecretStore({ stateDir: resolvePaths(home).runDir }), print: json ? (l) => out.push(l) : print }), opts);
   if (json) print(JSON.stringify(report, null, 2));
   return report.ok ? 0 : 1;
 }

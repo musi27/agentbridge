@@ -214,23 +214,34 @@ Messages held at the relay expire after 7 days. If any expire, both you (notific
 
 ## After an upgrade, macOS asks to use the "agentbridge" keychain items
 
-**Symptom.** After `npm install -g @musi27/agentbridge` and `agentbridge init`, macOS shows one or more dialogs:
-"AgentBridge wants to use your confidential information stored in "agentbridge" in your keychain."
+**Symptom.** After `npm install -g @musi27/agentbridge` and `agentbridge init`, macOS asks for your login password:
+"AgentBridge wants to use your confidential information stored in "agentbridge: saved keys" in your keychain." Older
+releases name each secret instead ("agentbridge: identity.ed25519", "agentbridge: bot.….token", …) and ask once per
+item.
 
-**Cause.** The keychain lets an item be read silently only by the program identity that saved it. Up to 0.2.5 the
-helper (`AgentBridge.app`) was ad-hoc signed, so that identity was the exact build, and every release that changed
-the helper asked once per item: the identity keys, the policy key, version and snapshot, and three items per Grok bot
-(about 7 with one bot). The helper is now signed with the project's Apple Developer ID, so the identity is "this
-team's AgentBridge", which later releases keep. **The first signed release asks one last time** for each item saved
-by an ad-hoc build. After that, updates don't ask.
+**Before it asks, agentbridge says so.** `agentbridge init` prints one line first, for example: "macOS may ask for your
+login password once so AgentBridge can read its saved keys. Enter it and choose Always Allow." A bridge started by
+launchd posts the same line as a notification. No line, no dialog expected.
 
-**Fix.** Enter your login password and choose **Always Allow** in each dialog. **Deny** makes that read fail, so the
-command or the bridge stops with a keychain error. Run it again (`agentbridge init` restarts the bridge) and allow it.
+**Cause.** The keychain lets an item be read silently only by the program identity that saved it (or that you allowed
+with Always Allow). Since 0.2.6 the helper (`AgentBridge.app`) is signed with the project's Apple Developer ID, so that
+identity is "this team's AgentBridge", which later releases keep: updates don't ask. Since the release after 0.2.6 all
+secrets live in **one** keychain item, `agentbridge: saved keys`, so if macOS ever does have to ask again (a helper you
+built from source, a keychain moved to another Mac), it asks once, not once per secret.
+
+The first run of that release moves the old items (one per secret: identity keys, policy key, version and snapshot,
+three per Grok bot) into the one item, checks it, then deletes them. It prints "AgentBridge is moving its N saved keys
+into one keychain item…" first. If you came from 0.2.6 and allowed its prompts, nothing asks. If you skipped 0.2.6 and
+come from 0.2.5 or earlier, macOS asks once per old item, this last time.
+
+**Fix.** Enter your login password and choose **Always Allow**. **Deny** makes that read fail: init stops with a
+keychain error and nothing is lost (the old items are deleted only after the new one reads back correctly). Run
+`agentbridge init` again and allow it.
 
 If a signed release keeps asking on every update, check the installed helper's signature:
 `codesign -dv "$(npm root -g)/@musi27/agentbridge/bin/AgentBridge.app" 2>&1 | grep -E 'TeamIdentifier|Signature'`
 should show `TeamIdentifier=67B9AY2VHJ` and no `Signature=adhoc`. A helper built from source (`npm run build:helper`)
-is ad-hoc signed and behaves like the old releases.
+is ad-hoc signed and asks after each rebuild.
 
 ## Touch ID is unavailable
 

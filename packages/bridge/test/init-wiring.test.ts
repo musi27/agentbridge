@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, chmodSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { verify as edVerify, createPublicKey } from 'node:crypto';
-import { SECRET_NAMES, userIdFromPubkey, type DoctorCheck } from '@agentbridge/protocol';
+import { SECRET_NAMES, userIdFromPubkey, type DoctorCheck, type SecretStore } from '@agentbridge/protocol';
 import { DENY_RULES } from '@agentbridge/adapter-claude-code';
 import { openDatabase, schemaVersion } from '../src/db/db.ts';
 import { Store } from '../src/db/store.ts';
@@ -361,6 +361,44 @@ test('integrator condition 2: exactly one presence check per run, before any wri
     assert.deepEqual(w.presence.reasons, ['finish setting up on this Mac']);
     assert.equal(writesBeforePresence, 0);
   } finally { w.cleanup(); }
+});
+
+test('init: the keychain step runs after the presence check and before the first secret read; its notice is printed first', async () => {
+  const events: string[] = [];
+  const run = async (running: 'managed' | false, notice: string | null, fail = false) => {
+    const w = world({ running });
+    const get = w.secrets.get.bind(w.secrets);
+    w.secrets.get = async (n) => { events.push(`get ${n}`); return get(n); };
+    const calls: { legacyNames: readonly string[]; keepLegacy: boolean | undefined }[] = [];
+    (w.secrets as SecretStore).prepare = async (o) => {
+      events.push(`prepare after ${w.presence.reasons.length} presence check(s)`);
+      calls.push({ legacyNames: o.legacyNames, keepLegacy: o.keepLegacy });
+      if (notice) o.notice(notice);
+      if (fail) throw new Error('User interaction is not allowed.');
+      return { warned: notice !== null, asks: notice ? 1 : 0, copied: 2, removed: 0 };
+    };
+    w.deps.secretNames = async () => ['identity.ed25519', 'bot.b1.token'];
+    try { return { r: await runInit(w.deps, { yes: true }), w, calls }; } finally { w.cleanup(); }
+  };
+  const a = await run(false, 'macOS may ask for your login password once so AgentBridge can read its saved keys. Enter it and choose Always Allow.');
+  assert.ok(a.r.ok, a.w.lines.join('\n'));
+  assert.equal(events[0], 'prepare after 1 presence check(s)');
+  assert.ok(events.slice(1).every((e) => e.startsWith('get ')));
+  assert.deepEqual(a.calls, [{ legacyNames: ['identity.ed25519', 'bot.b1.token'], keepLegacy: false }]);
+  const i = a.w.lines.findIndex((l) => l.startsWith('macOS may ask'));
+  assert.ok(i > 0 && a.w.lines[i + 1]!.includes('moved 2 saved keys into one keychain item ("agentbridge: saved keys")'), a.w.lines.join('\n'));
+  assert.ok(a.r.steps.some((s) => s.id === 'keychain' && s.ok));
+  // a running (older) bridge may still read the old items: copy only
+  events.length = 0;
+  const b = await run('managed', null);
+  assert.equal(b.calls[0]!.keepLegacy, true);
+  assert.ok(!b.w.lines.some((l) => l.startsWith('macOS')));
+  // a refused read (Deny) stops init before anything else touches the keychain
+  events.length = 0;
+  const c = await run(false, null, true);
+  assert.equal(c.r.ok, false);
+  assert.deepEqual(events, ['prepare after 1 presence check(s)']);
+  assert.match(c.w.lines.join('\n'), /FAIL {2}keychain: User interaction is not allowed\.\n {6}fix: run agentbridge init again; if macOS asks for your login password, enter it and choose Always Allow/);
 });
 
 test('integrator condition 3: init re-signs policy like config set; the bridge starts without policy_tampered', async () => {

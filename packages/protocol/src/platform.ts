@@ -11,6 +11,40 @@ export interface SecretStore {
   get(name: string): Promise<string | null>;
   set(name: string, value: string): Promise<void>;
   delete(name: string): Promise<void>;
+  /**
+   * Optional (the macOS keychain store): run before the first read at init and service start. Warns through
+   * `notice` when the OS is likely to ask for the login password, moves secrets saved in an older layout, and
+   * finishes an interrupted write.
+   */
+  prepare?(o: SecretStorePrepareOptions): Promise<SecretStorePrepareResult>;
+  /** Optional: delete every secret, including older-layout items named in `legacyNames`. Returns how many were removed. */
+  purge?(legacyNames: readonly string[]): Promise<number>;
+}
+
+export interface SecretStorePrepareOptions {
+  /** Every secret name that may exist in an older layout (SECRET_NAMES, with each known bot id). */
+  legacyNames: readonly string[];
+  /** One plain line for the user, shown before a likely OS password prompt. */
+  notice(line: string): void;
+  /** Copy older-layout items but don't delete them yet (an older bridge may still be running). */
+  keepLegacy?: boolean;
+}
+
+export interface SecretStorePrepareResult {
+  /** A notice was given. */
+  warned: boolean;
+  /** How many OS prompts were expected. */
+  asks: number;
+  /** Older-layout secrets copied into the current layout. */
+  copied: number;
+  /** Older-layout items deleted. */
+  removed: number;
+}
+
+/** Every secret name the bridge may have saved, given the bot ids it knows. */
+export function allSecretNames(botIds: readonly string[]): string[] {
+  return [SECRET_NAMES.ed25519, SECRET_NAMES.x25519, SECRET_NAMES.policyHmacKey, SECRET_NAMES.policyVersion, SECRET_NAMES.policySnapshot,
+    ...botIds.flatMap((b) => [SECRET_NAMES.botToken(b), SECRET_NAMES.webhookUrl(b), SECRET_NAMES.webhookKey(b)])];
 }
 
 export interface Notifier { notify(n: { title: string; body: string; subtitle?: string }): Promise<void> }

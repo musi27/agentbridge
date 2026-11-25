@@ -101,7 +101,7 @@ test('uninstall: removes plugin, marketplace, launchd agent, bridge and deny rul
   const out = w.lines.join('\n');
   assert.match(out, /removed {2}Claude Code plugin agentbridge@agentbridge/);
   assert.match(out, new RegExp(`removed {2}${DENY_RULES.length} agentbridge deny rules`));
-  assert.match(out, /left {5}Keychain items under service "agentbridge"[\s\S]*fix: agentbridge uninstall --purge-data/);
+  assert.match(out, /left {5}saved keys in the Keychain, service "agentbridge"[\s\S]*fix: agentbridge uninstall --purge-data/);
   // Grok refuses to delete its own connector (2026-11-24 reinstall): the user does it at grok.com/connectors
   assert.match(out, /In Grok: delete the agentbridge connector at https:\/\/grok\.com\/connectors .*"Inbox from agentbridge" routine.*Grok will not delete them/);
   assert.match(w.lines.at(-1)!, /npm uninstall -g @musi27\/agentbridge$/);
@@ -117,7 +117,7 @@ test('uninstall --purge-data: deletes the keychain items (incl. per-bot ones fro
   assert.equal(existsSync(w.paths.root), false);
   assert.ok(!w.events.includes('marker remove'), 'the marker went with the folder');
   assert.deepEqual(w.presence.reasons, ['uninstall itself and delete all its data']);
-  assert.match(w.lines.join('\n'), /removed {2}11 Keychain items under service "agentbridge"/);
+  assert.match(w.lines.join('\n'), /removed {2}11 saved keys in the Keychain \(service "agentbridge"\)/);
 
   // second run: everything already gone, nothing fails
   w.lines.length = 0; w.events.length = 0;
@@ -126,6 +126,17 @@ test('uninstall --purge-data: deletes the keychain items (incl. per-bot ones fro
   assert.deepEqual(status(again), { plugin: 'absent', marketplace: 'absent', launchd: 'absent', bridge: 'absent', deny_rules: 'absent', keychain: 'absent', data: 'absent', relay: 'left' });
   assert.ok(!w.events.includes('marker write'), 'no data folder: no marker');
   assert.deepEqual(JSON.parse(readFileSync(w.settingsPath, 'utf8')), OTHER_SETTINGS);
+});
+
+test('uninstall --purge-data: a store with purge (the one-item keychain) gets every known name, including per-bot ones', async (t) => {
+  const w = world(); t.after(w.cleanup);
+  const asked: string[][] = [];
+  (w.secrets as MemorySecretStore & { purge?: (n: readonly string[]) => Promise<number> }).purge = async (names) => { asked.push([...names]); return 4; };
+  const r = await runUninstall(w.deps, { purgeData: true });
+  assert.equal(r.ok, true, w.lines.join('\n'));
+  assert.equal(asked.length, 1);
+  assert.ok(asked[0]!.includes(SECRET_NAMES.webhookKey('b2')) && asked[0]!.includes(SECRET_NAMES.ed25519));
+  assert.match(w.lines.join('\n'), /removed {2}4 saved keys in the Keychain/);
 });
 
 test('uninstall: a failed presence check changes nothing', async (t) => {

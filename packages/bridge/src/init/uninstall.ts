@@ -6,7 +6,7 @@
 // bridge → deny rules → (--purge-data) Keychain items, then the data folder → Grok-side and npm steps for the user.
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { basename, resolve, sep } from 'node:path';
-import { GROK_CONNECTORS_URL, SECRET_NAMES, type PresenceChecker, type SecretStore } from '@agentbridge/protocol';
+import { GROK_CONNECTORS_URL, allSecretNames, type PresenceChecker, type SecretStore } from '@agentbridge/protocol';
 import { removeDenyRules } from '@agentbridge/adapter-claude-code';
 import { MARKETPLACE_NAME, PLUGIN_ID, type ClaudeRunner } from './init.ts';
 import type { Paths } from '../paths.ts';
@@ -45,13 +45,8 @@ const LABEL: Record<StepStatus, string> = { removed: 'removed', absent: 'absent 
 const shown = (a: string[]): string => `claude ${a.join(' ')}`;
 const notFound = (r: { stdout: string; stderr: string }): boolean => /not found|not installed|no such|does not exist/i.test(`${r.stdout}${r.stderr}`);
 
-/** The Keychain item names agentbridge writes; per-bot names need the bot ids from the database. */
-export function secretNames(botIds: readonly string[]): string[] {
-  return [
-    SECRET_NAMES.ed25519, SECRET_NAMES.x25519, SECRET_NAMES.policyHmacKey, SECRET_NAMES.policyVersion, SECRET_NAMES.policySnapshot,
-    ...botIds.flatMap((id) => [SECRET_NAMES.botToken(id), SECRET_NAMES.webhookUrl(id), SECRET_NAMES.webhookKey(id)]),
-  ];
-}
+/** The secret names agentbridge writes; per-bot names need the bot ids from the database. */
+export function secretNames(botIds: readonly string[]): string[] { return allSecretNames(botIds); }
 
 /** Why `root` must not be deleted, or null when it looks like an agentbridge data folder. */
 export function unsafeDataRoot(root: string, homeDir: string): string | null {
@@ -126,25 +121,22 @@ export async function runUninstall(deps: UninstallDeps, o: UninstallOptions = {}
     // 7. data: only with --purge-data
     const root = deps.paths.root;
     if (!o.purgeData) {
-      step({ id: 'keychain', status: 'left', detail: `Keychain items under service "${KEYCHAIN_SERVICE}" (identity keys, policy key, bot tokens)`, fix: 'agentbridge uninstall --purge-data' });
+      step({ id: 'keychain', status: 'left', detail: `saved keys in the Keychain, service "${KEYCHAIN_SERVICE}" (identity keys, policy key, bot tokens)`, fix: 'agentbridge uninstall --purge-data' });
       if (existsSync(root)) step({ id: 'data', status: 'left', detail: `${root} (conversation history, policy, logs)`, fix: 'agentbridge uninstall --purge-data' });
       else step({ id: 'data', status: 'absent', detail: `${root} (not present)` });
     } else {
       // bot ids live in the database: read them before the folder goes
-      let botIds: string[] | null = [];
-      if (existsSync(deps.paths.db)) {
-        try {
-          const { openDatabase } = await import('../db/db.ts'); const { Store } = await import('../db/store.ts');
-          const db = openDatabase(deps.paths.db); try { botIds = new Store(db).bots().map((b) => b.bot_id); } finally { db.close(); }
-        } catch { botIds = null; }
-      }
+      const { knownBotIds } = await import('./secret-names.ts');
+      const botIds = await knownBotIds(deps.paths.db);
       const unsafe = existsSync(root) ? unsafeDataRoot(root, deps.homeDir) : null;
       try {
         const secrets = await deps.secrets();
         let deleted = 0;
-        for (const n of secretNames(botIds ?? [])) { if ((await secrets.get(n)) !== null) { await secrets.delete(n); deleted++; } }
-        const tail = botIds === null ? '; the database was unreadable, so per-bot items may remain' : '';
-        step({ id: 'keychain', status: deleted ? 'removed' : 'absent', detail: deleted ? `${deleted} Keychain items under service "${KEYCHAIN_SERVICE}"${tail}` : `Keychain items under service "${KEYCHAIN_SERVICE}" (none found${tail})`, ...(botIds === null ? { fix: `security delete-generic-password -s ${KEYCHAIN_SERVICE} (repeat until it reports that the item could not be found)` } : {}) });
+        // the keychain store deletes its one item (all secrets) plus any items left from the old one-per-secret layout
+        if (secrets.purge) deleted = await secrets.purge(secretNames(botIds ?? []));
+        else for (const n of secretNames(botIds ?? [])) { if ((await secrets.get(n)) !== null) { await secrets.delete(n); deleted++; } }
+        const tail = botIds === null && !secrets.purge ? '; the database was unreadable, so per-bot items may remain' : botIds === null ? '; the database was unreadable, so old one-per-secret items of Grok bots may remain' : '';
+        step({ id: 'keychain', status: deleted ? 'removed' : 'absent', detail: deleted ? `${deleted} saved keys in the Keychain (service "${KEYCHAIN_SERVICE}")${tail}` : `saved keys in the Keychain (service "${KEYCHAIN_SERVICE}"; none found${tail})`, ...(botIds === null ? { fix: `security delete-generic-password -s ${KEYCHAIN_SERVICE} (repeat until it reports that the item could not be found)` } : {}) });
       } catch (e) {
         step({ id: 'keychain', status: 'failed', detail: `Keychain items: ${(e as Error).message}`, fix: `security delete-generic-password -s ${KEYCHAIN_SERVICE} (repeat until it reports that the item could not be found)` });
       }

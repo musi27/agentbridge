@@ -35,14 +35,20 @@ export async function verifyHelper(opts: HelperClientOptions = {}): Promise<{ pa
 /** Test/e2e only: a throwaway keychain service "agentbridge.test.<suffix>" (anything else is refused). */
 export const KEYCHAIN_SERVICE_ENV = 'AGENTBRIDGE_KEYCHAIN_SERVICE';
 
-export async function createSecretStore(opts: HelperClientOptions & { env?: NodeJS.ProcessEnv } = {}): Promise<SecretStore> {
-  const { env = process.env, ...helper } = opts;
+export interface CreateSecretStoreOptions extends HelperClientOptions {
+  env?: NodeJS.ProcessEnv;
+  /** Folder for the keychain write lock and trust marker: <agentbridge home>/run. */
+  stateDir?: string;
+}
+
+export async function createSecretStore(opts: CreateSecretStoreOptions = {}): Promise<SecretStore> {
+  const { env = process.env, stateDir, ...helper } = opts;
   const override = env[KEYCHAIN_SERVICE_ENV];
   if (override !== undefined && override !== KEYCHAIN_SERVICE && !TEST_SERVICE_RE.test(override)) {
     throw new TypeError(`${KEYCHAIN_SERVICE_ENV} may only name a throwaway "agentbridge.test.<suffix>" service`);
   }
   await verifyHelper(helper);
-  return new MacKeychainStore({ ...helper, ...(override === undefined ? {} : { service: override }) });
+  return new MacKeychainStore({ ...helper, ...(stateDir === undefined ? {} : { stateDir }), ...(override === undefined ? {} : { service: override }) });
 }
 
 export async function createPresenceChecker(opts: HelperClientOptions = {}): Promise<PresenceChecker> {

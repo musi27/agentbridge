@@ -9,7 +9,7 @@ export interface Platform { secrets: SecretStore; presence: PresenceChecker; not
 
 /** Expected exports of @agentbridge/presence. */
 interface PresenceModule {
-  createSecretStore?: () => SecretStore | Promise<SecretStore>;
+  createSecretStore?: (o?: { stateDir?: string }) => SecretStore | Promise<SecretStore>;
   createPresenceChecker?: () => PresenceChecker | Promise<PresenceChecker>;
   createNotifier?: () => Notifier | Promise<Notifier>;
 }
@@ -40,7 +40,7 @@ export async function loadPlatform(root: string, env: NodeJS.ProcessEnv = proces
   try { mod = (await import('@agentbridge/presence')) as PresenceModule; } catch { mod = null; }
   const presence = mod?.createPresenceChecker ? await mod.createPresenceChecker() : unavailablePresence;
   const notifier = mod?.createNotifier ? await mod.createNotifier() : deferredNotifier;
-  if (mod?.createSecretStore && !devSecrets) return { secrets: await mod.createSecretStore(), presence, notifier, source: spec };
+  if (mod?.createSecretStore && !devSecrets) return { secrets: await mod.createSecretStore({ stateDir: join(root, 'run') }), presence, notifier, source: spec };
   if (devSecrets) return { secrets: new FileSecretStore(root), presence, notifier, source: 'dev-file' };
   throw new Error('no keychain available: install @agentbridge/presence (macOS), or set AGENTBRIDGE_DEV_SECRETS=1 for development');
 }

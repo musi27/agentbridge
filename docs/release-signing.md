@@ -56,12 +56,38 @@ Items in the legacy login keychain trust the creating program's **designated req
 
 - **Ad hoc**: the requirement is the cdhash only (the identifier is not part of it). Every change to the bundle's
   code, `Info.plist` or icon makes macOS ask "AgentBridge wants to use your confidential information stored in
-  "agentbridge" in your keychain" once per item. Upgrading to 0.2.5 (the first `AgentBridge.app`) showed about 7.
+  "agentbridge: <secret name>" in your keychain" once per item (the name is the item's label, see below). Upgrading
+  to 0.2.5 (the first `AgentBridge.app`) showed about 7.
 - **Developer ID**: the requirement is Apple anchor + identifier + Team ID, so any later build signed by the same team
   with the same identifier reads silently, whatever its code.
 
 The same holds for user permissions tied to the app's identity (TCC), such as notifications from the planned agent
 panel: with Developer ID they survive updates.
+
+## Since then: one item, so at most one prompt
+
+The release after 0.2.6 keeps all secrets in one item, `agentbridge: saved keys`, and moves the old items into it on
+its first run, with no prompt for items the signed helper can already read (checked with a throwaway keychain, below).
+Before a likely prompt `init` prints one line, and the bridge posts it as a notification. Details:
+[the presence README](../packages/presence/README.md#keychain-item-one-for-all-secrets). The name in the dialog is the
+item's label: the access list created with an item takes the label as its description, which is what security dialogs
+show (`security dump-keychain -a` prints it). The helper sets the label to "agentbridge: <account>".
+
+### Throwaway-keychain test of the one-item store
+
+Checked 2026-11-25 on macOS 26 (Apple Silicon) with
+[`packages/presence/scripts/keychain-proof.ts`](../packages/presence/scripts/keychain-proof.ts): probes of
+`main.swift` that use a throwaway keychain file, signed ad hoc and with Developer ID twice (different code), with
+dialogs disallowed (`SecKeychainSetUserInteractionAllowed(false)`), so a read that would ask fails instead.
+
+| Step | Result |
+|---|---|
+| 11 old items (2 Grok bots) saved by Developer ID build 1; `prepare` with build 1 | copied 11, verified, deleted 11; one item `saved keys` left; **no dialog** |
+| the same item read by Developer ID build 2 | **silent**; `prepare` prints no notice |
+| control: ad-hoc build reads it | refused (−25293, would ask); `prepare` prints the notice first |
+| old items from build 1 moved by build 2 | silent, all 11 read back by build 1 |
+| move SIGKILLed after each of its 28 helper calls in turn, then build 2 runs | 28/28 recovered, all 11 secrets, old items gone |
+| access-list description of the item | `agentbridge: saved keys` |
 
 ## Moving from ad hoc to Developer ID: one prompt per item, once
 

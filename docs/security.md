@@ -25,7 +25,9 @@ To report a vulnerability, see [SECURITY.md](../SECURITY.md).
 - Your local Claude Code sessions and what they can do.
 - Your Grok account.
 - Conversation content.
-- Bridge secrets: identity keys, policy integrity key, bot tokens, webhook URLs and keys (all in the macOS Keychain).
+- Bridge secrets: identity keys, policy integrity key, bot tokens, webhook URLs and keys (all in one macOS Keychain
+  item, `agentbridge: saved keys`, readable without a prompt only by the Developer ID-signed `AgentBridge.app`; see
+  [the presence README](../packages/presence/README.md#keychain-item-one-for-all-secrets)).
 
 ## In scope
 

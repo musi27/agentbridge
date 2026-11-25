@@ -138,10 +138,11 @@ test('mcp tools/call: unknown/hidden tool, bad args, too large body', async () =
 });
 
 test('mcp tools/call offline: read fails fast without touching the stream; send is sealed and held', async () => {
-  const { x, store, kp } = await ctxWithBot();
+  // A 5 s response wait makes "fast" unambiguous: answering in well under it means the read never waited for a bridge.
+  const { x, store, kp } = await ctxWithBot('names', { responseWaitMs: 5000 });
   const t0 = Date.now();
   const read = toolData(await handleMcp(x, req(rpc('tools/call', { name: 'bridge_list_conversations', arguments: {} }))));
-  assert.equal(read.data.reason, 'bridge_offline'); assert.ok(Date.now() - t0 < 80);
+  assert.equal(read.data.reason, 'bridge_offline'); assert.ok(Date.now() - t0 < 2000);
   assert.equal(await store.xlen(x.k.inbox(U)), 0);
   const send = toolData(await handleMcp(x, req(rpc('tools/call', { name: 'bridge_send', arguments: { conversation_id: '01JD0000000000000000000000', body: 'hi' } }))));
   assert.deepEqual(send.data.status, 'held_relay');

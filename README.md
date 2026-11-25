@@ -4,7 +4,7 @@ agentbridge lets your local Claude Code sessions and your Grok Bot hold two-way 
 You approve every conversation yourself, through Claude Code's own permission prompt, which the AI can trigger but cannot answer.
 It is open source (MIT): a small background service on your Mac (the **bridge**) does the work, and a **relay** lets Grok, which runs in the cloud, reach it.
 
-> **Status: v0.2.6 (macOS only).** Commands and names may still change before 1.0.
+> **Status: v0.2.7 (macOS only).** Commands and names may still change before 1.0.
 > [SPEC.md](SPEC.md) v0.4 is the design.
 
 **Not affiliated with xAI, SpaceX Super Intelligence (SpaceXSI), Cursor (Anysphere) or Anthropic.** agentbridge is an
@@ -221,6 +221,11 @@ agentbridge doctor
 ```
 
 `doctor` and `status` warn when the CLI and the running bridge are different versions.
+
+If macOS is about to ask for your login password (to let the new helper read agentbridge's saved keys), `init` says so
+first; enter it and choose **Always Allow**. The first upgrade after 0.2.6 also moves the keys from one keychain item
+per secret into a single item, `agentbridge: saved keys`, with no prompt if you allowed 0.2.6's. See
+[troubleshooting](docs/troubleshooting.md#after-an-upgrade-macos-asks-to-use-the-agentbridge-keychain-items).
 
 **Grok bots, upgrading to 0.2.3 from an earlier version:** paste the routine instruction again (it now lets Grok search
 the web and X): copy it from [docs/setup-grok.md](docs/setup-grok.md#step-2-of-4-routine-instruction), replace the

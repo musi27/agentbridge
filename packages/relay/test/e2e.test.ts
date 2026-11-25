@@ -214,14 +214,18 @@ test('§19.3 #12: a Redis dump without the bridge key is unreadable', async () =
 });
 
 test('§19.4 lost wake: the periodic poll still delivers', async () => {
-  const store = new MemoryStore();
+  // Count the wakes that were dropped: delivery with every wake lost can only have come from the poll. (Timing it
+  // instead is flaky: the call can land just before a poll tick.)
+  let dropped = 0;
+  const store = new (class extends MemoryStore {
+    override async publish(channel: string, message: string) { if (this.dropPublishes) dropped++; return super.publish(channel, message); }
+  })();
   const s = await setup({ store, cfg: { pollMs: 150, responseWaitMs: 3000 } });
   try {
     store.dropPublishes = true;
-    const t0 = Date.now();
     const r = await callTool(s.r.url, s.id.userId, s.bot.botId, s.bot.token, 'bridge_send', { conversation_id: CONV, body: 'x' });
     assert.equal(r.data.status, 'ok');
-    assert.ok(Date.now() - t0 >= 50, 'came via poll, not wake');
+    assert.ok(dropped >= 1, 'the wake for this call was published (and dropped)');
   } finally { store.dropPublishes = false; await s.stop(); }
 });
 

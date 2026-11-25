@@ -10,8 +10,10 @@ import { RelayClient, type RelayClientOptions } from '../src/client.ts';
 
 export interface Running { relay: Relay; url: string; host: string; store: MemoryStore; stop(): Promise<void> }
 
+// pollMs also sets the presence TTL (3 x pollMs; production polls every 60 s). 500 ms keeps a 1.5 s TTL, so an event-loop
+// stall on a loaded runner can't expire a live bridge's presence mid-test.
 export async function startRelay(cfg: Partial<RelayConfig> = {}, store = new MemoryStore()): Promise<Running> {
-  const relay = createRelay({ store, keyPrefix: 't:', pollMs: 200, ...cfg });
+  const relay = createRelay({ store, keyPrefix: 't:', pollMs: 500, ...cfg });
   await new Promise<void>((r) => relay.server.listen(0, '127.0.0.1', () => r()));
   const port = (relay.server.address() as AddressInfo).port;
   return { relay, url: `http://127.0.0.1:${port}`, host: `127.0.0.1:${port}`, store, stop: () => relay.close() };

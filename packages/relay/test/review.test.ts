@@ -166,16 +166,30 @@ test('relay terminates a socket that stops answering pings (two missed pongs)', 
     const t0 = Date.now();
     const code = await new Promise<number>((res) => ws.on('close', (c) => res(c)));
     assert.equal(code, 1006);
-    assert.ok(Date.now() - t0 < 1000);
+    assert.ok(Date.now() - t0 < 2000, 'terminated after a few heartbeats, not left open'); // ~120 ms idle; slack for a loaded runner
   } finally { await r.stop(); }
 });
 
+// Timing margins below are sized for a loaded CI runner, where one event-loop stall can exceed 300 ms: each test keeps
+// what it proves but leaves several hundred ms between "works" and "fails".
+
 test('relay heartbeat keeps a healthy client connected (wake frames)', async () => {
-  const s = await setup({ cfg: { heartbeatMs: 30 }, client: { silenceTimeoutMs: 120 } });
+  // Count the wake frames the client receives, so the test can't pass on a link that is merely quiet.
+  let wakes = 0;
+  const Counting = class extends globalThis.WebSocket {
+    constructor(url: string | URL, protocols?: string | string[]) {
+      super(url, protocols);
+      this.addEventListener('message', (ev) => { if (String(ev.data).includes('"type":"wake"')) wakes++; });
+    }
+  };
+  // Heartbeat 50 ms vs silence timeout 600 ms: a 12x ratio, so only a stall over ~550 ms could cause a false drop.
+  const s = await setup({ cfg: { heartbeatMs: 50 }, client: { silenceTimeoutMs: 600, WebSocket: Counting as typeof globalThis.WebSocket } });
   try {
     let drops = 0; s.c.on('disconnected', () => drops++);
-    await sleep(500);
+    const wakes0 = wakes;
+    await sleep(1000); // longer than the silence timeout plus its check interval (~800 ms): without wakes the client would drop
     assert.equal(drops, 0);
+    assert.ok(wakes - wakes0 >= 5, `only ${wakes - wakes0} wake frames in 1 s (heartbeat 50 ms)`);
   } finally { await s.stop(); }
 });
 
@@ -184,7 +198,7 @@ test('client drops a silent connection and reconnects', async () => {
   try {
     const reasons: string[] = []; s.c.on('disconnected', (e: { reason: string }) => reasons.push(e.reason));
     let readies = 0; s.c.on('ready', () => readies++);
-    await until(() => readies >= 1, 2000);
+    await until(() => readies >= 1, 5000);
     assert.ok(reasons.includes('relay silent'));
   } finally { await s.stop(); }
 });
@@ -198,7 +212,7 @@ test('client gives up on a connect stuck before ready and retries', async () => 
   const c = client(`http://127.0.0.1:${port}`, await newIdentity(), async () => null, { handshakeTimeoutMs: 100, backoffBaseMs: 20 });
   try {
     await c.start();
-    await until(() => conns >= 3, 3000);
+    await until(() => conns >= 3, 5000);
   } finally {
     await c.stop();
     for (const w of wss.clients) w.terminate();

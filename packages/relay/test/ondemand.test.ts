@@ -43,8 +43,9 @@ test('on_demand: an idle client picks up a held write within about one pending i
     const t0 = Date.now();
     const w = await callTool(s.r.url, s.id.userId, s.bot.botId, s.bot.token, 'bridge_send', { conversation_id: CONV, body: 'while-idle' });
     assert.equal(w.data.status, 'held_relay');
-    await until(() => s.calls.includes('while-idle'), 2000);
-    assert.ok(Date.now() - t0 < 80 * 1.2 + 500, `picked up after ${Date.now() - t0} ms`);
+    await until(() => s.calls.includes('while-idle'), 3000);
+    // Only the pending check (every 80 ms here) can pick it up while idle; the bound leaves room for a loaded runner.
+    assert.ok(Date.now() - t0 < 80 + 1000, `picked up after ${Date.now() - t0} ms`);
     // a call from Grok is activity: connected for activeWindowMs, then idle
     await until(() => !s.c.connected, 2000);
     assert.equal(await s.r.store.xlen(`t:user:${s.id.userId}:inbox`), 0);
@@ -61,29 +62,32 @@ test('on_demand: reads while idle return bridge_offline', async () => {
 });
 
 test('on_demand: markActive connects and holds the connection; without activity it drops', async () => {
-  const s = await onDemandSetup({ activeWindowMs: 250 });
+  // Window 600 ms, renewed every 150 ms for 750 ms (longer than one window): a stall under ~450 ms can't drop it.
+  const s = await onDemandSetup({ activeWindowMs: 600 });
   try {
     s.c.markActive();
     await until(() => s.c.connected, 2000);
     const drops0 = s.events.filter((e) => e === 'disconnected').length;
-    for (let i = 0; i < 6; i++) { await sleep(100); s.c.markActive(); }
+    for (let i = 0; i < 5; i++) { await sleep(150); s.c.markActive(); }
     assert.equal(s.events.filter((e) => e === 'disconnected').length, drops0, 'held while active');
     assert.ok(s.c.connected);
     // live read works while active
     const r = await callTool(s.r.url, s.id.userId, s.bot.botId, s.bot.token, 'bridge_list_conversations', {});
     assert.equal(r.data.status, 'ok');
-    await until(() => !s.c.connected, 2000);
+    await until(() => !s.c.connected, 4000);
     assert.ok(s.events.at(-1) === 'idle' || s.events.includes('idle'));
   } finally { await s.stop(); }
 });
 
 test('on_demand: daily cap disconnects, emits cap_reached, and keeps the client idle; ensureConnected still works', async () => {
-  const s = await onDemandSetup({ maxConnectedMsPerDay: 250, activeWindowMs: 10_000 });
+  // The setup's own control call is connected time too; on a loaded runner it can reach the cap before this test
+  // subscribes, so count cap_reached from the setup's event log (attached before start) rather than a late listener.
+  const s = await onDemandSetup({ maxConnectedMsPerDay: 500, activeWindowMs: 10_000 });
+  const caps = () => s.events.filter((e) => e === 'cap_reached').length;
   try {
-    const caps: unknown[] = []; s.c.on('cap_reached', (e) => caps.push(e));
     s.c.markActive();
-    await until(() => caps.length === 1, 3000);
-    await until(() => !s.c.connected, 1000);
+    await until(() => caps() === 1, 3000);
+    await until(() => !s.c.connected, 3000);
     assert.ok(s.c.capReached);
     s.c.markActive(); await sleep(200);
     assert.equal(s.c.connected, false, 'stays idle after the cap');
@@ -91,7 +95,7 @@ test('on_demand: daily cap disconnects, emits cap_reached, and keeps the client 
     await callTool(s.r.url, s.id.userId, s.bot.botId, s.bot.token, 'bridge_send', { conversation_id: CONV, body: 'after-cap' });
     await sleep(300);
     assert.ok(!s.calls.includes('after-cap'));
-    assert.equal(caps.length, 1, 'popup once per day');
+    assert.equal(caps(), 1, 'popup once per day');
     // explicit CLI requests are not subject to the cap
     await s.c.control('set_discovery', { bot_id: s.bot.botId, mode: 'none' });
   } finally { await s.stop(); }

@@ -33,7 +33,8 @@ test('MacKeychainStore: the secret value travels only on stdin, never argv/env',
     const stdout = sub === 'keychain-get' ? '{"ok":true,"value":"s3cret"}' : sub === 'keychain-delete' ? '{"deleted":true,"ok":true}' : '{"ok":true}';
     return { code: 0, signal: null, stdout, stderr: '', timedOut: false };
   };
-  const s = new MacKeychainStore({ runner, helperPath: '/x/agentbridge-helper', service: 'agentbridge.test.svc' });
+  // the raw item calls under the one-item store (keychain-combined.test.ts covers the store itself)
+  const s = new MacKeychainStore({ runner, helperPath: '/x/agentbridge-helper', service: 'agentbridge.test.svc' }).items;
   await s.set('bot.r.token', 'TOPSECRET-123');
   assert.equal(await s.get('bot.r.token'), 's3cret');
   await s.delete('bot.r.token');
@@ -95,12 +96,12 @@ test('keychain-set replaces a pre-created foreign item (fresh attributes)', asyn
   if ('skip' in h) return t.skip(h.skip);
   const service = `agentbridge.test.${randomBytes(6).toString('hex')}`;
   const s = new MacKeychainStore({ service });
-  t.after(async () => { await s.delete('preseeded').catch(() => {}); });
+  t.after(async () => { await s.items.delete('preseeded').catch(() => {}); });
   // Dummy value (not a secret); -A avoids an access prompt when the helper deletes it.
   execFileSync('/usr/bin/security', ['add-generic-password', '-s', service, '-a', 'preseeded', '-l', 'foreign label', '-w', 'dummy', '-A']);
   const label = () => /0x00000007 <blob>="([^"]*)"/.exec(execFileSync('/usr/bin/security', ['find-generic-password', '-s', service, '-a', 'preseeded'], { encoding: 'utf8' }))?.[1];
   assert.equal(label(), 'foreign label');
-  await s.set('preseeded', 'mine');
+  await s.items.set('preseeded', 'mine');
   assert.equal(label(), 'agentbridge: preseeded');
-  assert.equal(await s.get('preseeded'), 'mine');
+  assert.equal(await s.items.get('preseeded'), 'mine');
 });

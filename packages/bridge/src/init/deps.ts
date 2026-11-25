@@ -142,6 +142,7 @@ export function realInitDeps(i: RealDepsInput): InitDeps {
       remove: () => { rmSync(join(i.paths.runDir, SETUP_MARKER_FILE), { force: true }); },
     },
     bridgeRunning: () => ping(i.paths.socket),
+    secretNames: async () => (await import('./secret-names.ts')).knownSecretNames(i.paths.db),
     version: BRIDGE_VERSION,
     async bridgeVersion() {
       if (!(await ping(i.paths.socket))) return null;

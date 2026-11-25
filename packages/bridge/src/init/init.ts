@@ -2,9 +2,9 @@
 // (InitDeps) so tests run in a temp AGENTBRIDGE_HOME with fake claude, keychain, presence and launchd.
 //
 // Order: Claude Code → plugin → deny rules → crossSessionInbound → stop a running bridge → user presence (the one
-// Touch ID check that authorises the local policy writes below) → identity → relay → approval mode →
+// Touch ID check that authorises the local policy writes below) → keychain (one item; warn before a prompt) → identity → relay → approval mode →
 // launchd agent → doctor → offer `add grok` → first try. Steps 6–9 hold the bridge lock (run/bridge.lock).
-import { AUTO_MODE_WARNING, LIMITS, type ApprovalMode, type DoctorCheck, type PresenceChecker, type SecretStore } from '@agentbridge/protocol';
+import { AUTO_MODE_WARNING, LIMITS, allSecretNames, type ApprovalMode, type DoctorCheck, type PresenceChecker, type SecretStore } from '@agentbridge/protocol';
 import { installDenyRules, readEffectiveCrossSessionInbound, inboundFix, versionAtLeast, parseVersion, type SettingsPathOptions } from '@agentbridge/adapter-claude-code';
 import type { Policy } from '../policy/policy.ts';
 import type { LaunchPaths } from './launch-env.ts';
@@ -52,6 +52,8 @@ export interface InitDeps {
   presence: PresenceChecker;
   policy: () => Promise<PolicyAccess>;
   service: ServiceControl;
+  /** Every secret name that may exist (SECRET_NAMES with the database's bot ids), for the keychain move. Optional. */
+  secretNames?(): Promise<string[]>;
   /** Is a bridge answering on the socket? */
   bridgeRunning(): Promise<boolean>;
   /** The running bridge's version (IPC hello), or null when none answers. Optional: tests without one skip the check. */
@@ -161,6 +163,19 @@ export async function runInit(deps: InitDeps, o: InitOptions = {}): Promise<Init
     return { ok: false, steps, userId };
   }
   step({ id: 'presence', ok: true, detail: 'Touch ID / password check works' }, deps, steps);
+
+  // 5b. keychain: all secrets live in one item. Say so before macOS is likely to ask for the login password (old
+  // one-per-secret items to move, or an item this helper isn't trusted for yet). A running older bridge may still
+  // read the old items, so they are only copied here; the bridge deletes them when it starts on this version.
+  if (deps.secrets.prepare) {
+    try {
+      const r = await deps.secrets.prepare({ legacyNames: (await deps.secretNames?.()) ?? allSecretNames([]), notice: (l) => deps.print(l), keepLegacy: await deps.bridgeRunning() });
+      if (r.copied > 0) step({ id: 'keychain', ok: true, detail: `moved ${r.copied} saved keys into one keychain item ("agentbridge: saved keys")` }, deps, steps);
+    } catch (e) {
+      step({ id: 'keychain', ok: false, detail: `keychain: ${(e as Error).message}`, fix: 'run agentbridge init again; if macOS asks for your login password, enter it and choose Always Allow' }, deps, steps);
+      return { ok: false, steps, userId };
+    }
+  }
 
   // 6. plan from the current state (read-only; the bridge may be running)
   const policy = await deps.policy();
