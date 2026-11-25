@@ -1,6 +1,6 @@
 // Builds the publishable `agentbridge` package in packaging/npm: self-contained ESM bundles of the CLI and the service
 // (every workspace package inlined, so the tarball has no dependencies), the Claude Code plugin folder with its
-// already-bundled runtime, a marketplace manifest pointing at it, the prebuilt helper, LICENSE.
+// already-bundled runtime, a marketplace manifest pointing at it, the prebuilt AgentBridge.app (the helper), LICENSE.
 // Usage: node --conditions=agentbridge-source packaging/npm/scripts/build.ts
 import { build, type Metafile } from 'esbuild';
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 export const PKG = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const REPO = resolve(PKG, '..', '..');
-const HELPER = join(REPO, 'packages', 'presence', 'bin', 'agentbridge-helper');
+const HELPER_APP = join(REPO, 'packages', 'presence', 'bin', 'AgentBridge.app');
 
 export async function buildPackage(): Promise<Metafile> {
   for (const d of ['dist', 'bin', 'plugin', '.claude-plugin']) rmSync(join(PKG, d), { recursive: true, force: true });
@@ -36,11 +36,12 @@ export async function buildPackage(): Promise<Metafile> {
     plugins: [{ name: 'agentbridge', source: './plugin', description: 'Human-approved conversations between your Claude Code sessions and other agents, through the local agentbridge bridge.' }],
   }, null, 2)}\n`);
 
-  // prebuilt helper (universal, ad-hoc signed by packages/presence/native/build.sh)
-  if (!existsSync(HELPER)) throw new Error(`helper missing at ${HELPER}: run npm run build:helper -w @agentbridge/presence`);
+  // prebuilt AgentBridge.app (universal helper inside, whole bundle ad-hoc signed by packages/presence/native/build.sh).
+  // Copied byte for byte: the signature seals Info.plist and the icon too.
+  if (!existsSync(join(HELPER_APP, 'Contents', 'MacOS', 'AgentBridge'))) throw new Error(`AgentBridge.app missing at ${HELPER_APP}: run npm run build:helper -w @agentbridge/presence`);
   mkdirSync(join(PKG, 'bin'), { recursive: true });
-  copyFileSync(HELPER, join(PKG, 'bin', 'agentbridge-helper'));
-  chmodSync(join(PKG, 'bin', 'agentbridge-helper'), 0o755);
+  cpSync(HELPER_APP, join(PKG, 'bin', 'AgentBridge.app'), { recursive: true, preserveTimestamps: true });
+  chmodSync(join(PKG, 'bin', 'AgentBridge.app', 'Contents', 'MacOS', 'AgentBridge'), 0o755);
   copyFileSync(join(REPO, 'LICENSE'), join(PKG, 'LICENSE'));
   return r.metafile;
 }

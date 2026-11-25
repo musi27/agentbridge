@@ -177,7 +177,7 @@ test('cli over ipc: unprivileged methods answer; privileged ones need the bridge
     assert.equal(st.policy.ok, true);
     h.presence.answer = { ok: false, code: 'cancelled' };
     assert.equal(await code(cli.request('cli.config_set', { key: 'approval.mode', value: 'auto' })), 'unauthenticated');
-    assert.match(h.presence.reasons.at(-1)!, /^change the agentbridge setting approval.mode$/);
+    assert.match(h.presence.reasons.at(-1)!, /^change its setting approval.mode$/);
     h.presence.answer = { ok: true, method: 'biometric_or_password' };
     const set = await cli.request<{ version: number }>('cli.config_set', { key: 'approval.mode', value: 'auto' });
     assert.equal(set.version, 2);

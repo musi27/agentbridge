@@ -358,7 +358,7 @@ test('integrator condition 2: exactly one presence check per run, before any wri
     const set = w.secrets.set.bind(w.secrets);
     w.secrets.set = async (n, v) => { if (w.presence.reasons.length === 0) writesBeforePresence++; return set(n, v); };
     await runInit(w.deps, { mode: 'auto' });
-    assert.deepEqual(w.presence.reasons, ['set up agentbridge on this Mac']);
+    assert.deepEqual(w.presence.reasons, ['finish setting up on this Mac']);
     assert.equal(writesBeforePresence, 0);
   } finally { w.cleanup(); }
 });

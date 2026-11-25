@@ -10,7 +10,7 @@ export function ensureHelper(): { path: string } | { skip: string } {
   try {
     execFileSync('/bin/sh', [BUILD, '--if-missing'], { stdio: ['ignore', 'ignore', 'pipe'] });
   } catch (e) {
-    return { skip: `cannot build agentbridge-helper: ${(e as { stderr?: Buffer }).stderr?.toString().trim() ?? String(e)}` };
+    return { skip: `cannot build AgentBridge.app: ${(e as { stderr?: Buffer }).stderr?.toString().trim() ?? String(e)}` };
   }
   return existsSync(DEFAULT_HELPER_PATH) ? { path: DEFAULT_HELPER_PATH } : { skip: 'helper not built' };
 }

@@ -155,7 +155,7 @@ export async function runInit(deps: InitDeps, o: InitOptions = {}): Promise<Init
   step({ id: 'cross_session_inbound', ok: eff.value === 'accept', detail: `crossSessionInbound = ${eff.value} (${eff.decidedBy})`, ...(eff.value === 'accept' ? {} : { fix: inboundFix(eff) }) }, deps, steps);
 
   // 5. user presence (§9.2): verifies the helper works and authorises init's changes. Before anything is stopped or written.
-  const pr = await deps.presence.check('set up agentbridge on this Mac');
+  const pr = await deps.presence.check('finish setting up on this Mac');
   if (!pr.ok) {
     step({ id: 'presence', ok: false, detail: `user presence check failed (${pr.code}${pr.detail ? `: ${pr.detail}` : ''})`, fix: pr.code === 'unavailable' ? 'build the helper: npm run build:helper -w @agentbridge/presence' : 'run agentbridge init again and approve the Touch ID / password prompt' }, deps, steps);
     return { ok: false, steps, userId };

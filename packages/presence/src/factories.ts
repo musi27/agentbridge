@@ -18,16 +18,16 @@ export class HelperMissingError extends Error {
 /** Checks the helper exists and answers `version` with the expected protocol. Throws HelperMissingError (message suits `doctor`). */
 export async function verifyHelper(opts: HelperClientOptions = {}): Promise<{ path: string; version: string }> {
   const path = opts.helperPath ?? DEFAULT_HELPER_PATH;
-  if (process.platform !== 'darwin') throw new HelperMissingError('agentbridge-helper is macOS-only');
-  if (opts.runner === undefined && !existsSync(path)) throw new HelperMissingError(`agentbridge-helper missing at ${path}; ${BUILD_HINT}`);
+  if (process.platform !== 'darwin') throw new HelperMissingError('the AgentBridge helper is macOS-only');
+  if (opts.runner === undefined && !existsSync(path)) throw new HelperMissingError(`AgentBridge helper missing at ${path}; ${BUILD_HINT}`);
   let res;
   try {
     res = await callHelper('version', {}, { ...opts, timeoutMs: 10_000 });
   } catch (e) {
-    throw new HelperMissingError(`agentbridge-helper at ${path} does not answer (${e instanceof HelperError ? e.message : String(e)}); ${BUILD_HINT}`);
+    throw new HelperMissingError(`AgentBridge helper at ${path} does not answer (${e instanceof HelperError ? e.message : String(e)}); ${BUILD_HINT}`);
   }
   if (!res.ok || res.protocol !== HELPER_PROTOCOL || res.version === undefined) {
-    throw new HelperMissingError(`agentbridge-helper at ${path} speaks an unexpected protocol (${JSON.stringify(res)}); ${BUILD_HINT}`);
+    throw new HelperMissingError(`AgentBridge helper at ${path} speaks an unexpected protocol (${JSON.stringify(res)}); ${BUILD_HINT}`);
   }
   return { path, version: res.version };
 }

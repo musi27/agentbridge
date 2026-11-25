@@ -44,11 +44,24 @@ export function verifyTarball(tgz: string): VerifyResult {
     const helperCheck = dc.find((c) => c.id === 'presence_helper');
     if (process.platform === 'darwin') {
       add('helper_answers', helperCheck?.ok === true && helperCheck.detail.includes(pkg), helperCheck ? helperCheck.detail : 'no presence_helper check');
-      const helper = join(pkg, 'bin', 'agentbridge-helper');
+      const app = join(pkg, 'bin', 'AgentBridge.app');
+      const helper = join(app, 'Contents', 'MacOS', 'AgentBridge');
+      add('helper_in_bundle', helperCheck?.detail.includes(helper) === true, `doctor runs ${helper} (inside the bundle, so macOS dialogs say "AgentBridge")`);
+      const plistOut = spawnSync('plutil', ['-convert', 'json', '-o', '-', join(app, 'Contents', 'Info.plist')], { encoding: 'utf8' });
+      let plist: Record<string, unknown> = {};
+      try { plist = JSON.parse(plistOut.stdout) as Record<string, unknown>; } catch { /* reported below */ }
+      add('app_bundle', plist['CFBundleIdentifier'] === 'live.musi.agentbridge' && plist['CFBundleName'] === 'AgentBridge' && plist['CFBundleExecutable'] === 'AgentBridge' && plist['LSUIElement'] === true,
+        `Info.plist: ${String(plist['CFBundleIdentifier'])}, name ${String(plist['CFBundleName'])}, LSUIElement ${String(plist['LSUIElement'])}`);
+      const icon = join(app, 'Contents', 'Resources', `${String(plist['CFBundleIconFile'])}.icns`);
+      const iconType = spawnSync('file', ['-b', icon], { encoding: 'utf8' }).stdout.trim();
+      add('app_icon', existsSync(icon) && /icon/i.test(iconType), `${icon.slice(app.length + 1)}: ${iconType || 'missing'}`);
       const archs = spawnSync('lipo', ['-archs', helper], { encoding: 'utf8' }).stdout.trim();
       add('helper_universal', archs.includes('arm64') && archs.includes('x86_64'), `architectures: ${archs}`);
-      const sig = spawnSync('codesign', ['-dv', helper], { encoding: 'utf8' }).stderr;
-      add('helper_adhoc_signed', /Signature=adhoc/.test(sig) && /Identifier=live\.musi\.agentbridge\.helper/.test(sig), sig.split('\n').filter((l) => /Identifier|Signature/.test(l)).join('; '));
+      // --strict over the bundle: the seal (Info.plist, icon, executable) survived npm pack + install intact
+      const strict = spawnSync('codesign', ['--verify', '--strict', '--verbose=1', app], { encoding: 'utf8' });
+      const sig = spawnSync('codesign', ['-dv', app], { encoding: 'utf8' }).stderr;
+      add('helper_adhoc_signed', strict.status === 0 && /Signature=adhoc/.test(sig) && /^Identifier=live\.musi\.agentbridge$/m.test(sig),
+        `${strict.status === 0 ? 'seal valid' : `seal broken: ${strict.stderr.trim()}`}; ${sig.split('\n').filter((l) => /^Identifier|^Signature/.test(l)).join('; ')}`);
     }
 
     // `agentbridge start` from the installed package: detached serve in a temp home (file secrets, never the keychain);

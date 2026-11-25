@@ -24,6 +24,7 @@
 | [../SPEC.md](../SPEC.md) | The specification (v0.4, authoritative) |
 | [notifications.md](notifications.md) | Desktop notifications from the bridge service: findings and the proposal for guaranteed delivery |
 | [releasing.md](releasing.md) | Building, verifying and publishing the npm package |
+| [release-notes/](release-notes/README.md) | User-facing notes for each release (the GitHub release bodies) |
 | [release-signing.md](release-signing.md) | Release signing and notarisation plan for the Touch ID helper |
 
 ## Contributing

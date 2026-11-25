@@ -2,6 +2,8 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 import { run } from '../src/exec.ts';
 import { parseHelperResponse } from '../src/protocol.ts';
 import { ensureHelper } from './helpers.ts';
@@ -31,7 +33,25 @@ test('universal binary (arm64 + x86_64), signed with the stable identifier', (t)
   assert.deepEqual(archs, ['arm64', 'x86_64']);
   // codesign -dv reports on stderr.
   const r = execFileSync('/bin/sh', ['-c', '/usr/bin/codesign -dv "$1" 2>&1', 'sh', helper], { encoding: 'utf8' });
-  assert.match(r, /Identifier=live\.musi\.agentbridge\.helper/);
+  assert.match(r, /Identifier=live\.musi\.agentbridge$/m);
+});
+
+test('AgentBridge.app: background bundle with the bundle id, icon and a valid seal over all of it', (t) => {
+  if (skip) return t.skip(skip);
+  const app = resolve(helper, '..', '..', '..');
+  assert.equal(basename(app), 'AgentBridge.app');
+  const plist = JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', join(app, 'Contents', 'Info.plist')], { encoding: 'utf8' })) as Record<string, unknown>;
+  assert.equal(plist['CFBundleIdentifier'], 'live.musi.agentbridge');
+  assert.equal(plist['CFBundleName'], 'AgentBridge');
+  assert.equal(plist['CFBundleExecutable'], 'AgentBridge');
+  assert.equal(plist['LSUIElement'], true);
+  assert.ok(existsSync(join(app, 'Contents', 'Resources', `${String(plist['CFBundleIconFile'])}.icns`)));
+  // Fixed Info.plist (no version stamped at build time): the ad-hoc cdhash, which the keychain trusts, stays put across releases.
+  assert.equal(readFileSync(join(app, 'Contents', 'Info.plist'), 'utf8'), readFileSync(new URL('../native/Info.plist', import.meta.url), 'utf8'));
+  execFileSync('/usr/bin/codesign', ['--verify', '--strict', app]);
+  const r = execFileSync('/bin/sh', ['-c', '/usr/bin/codesign -dv "$1" 2>&1', 'sh', app], { encoding: 'utf8' });
+  assert.match(r, /Signature=adhoc/);
+  assert.match(r, /Identifier=live\.musi\.agentbridge$/m);
 });
 
 test('usage and protocol errors: exit 2 with a JSON error, nothing on stderr', async (t) => {

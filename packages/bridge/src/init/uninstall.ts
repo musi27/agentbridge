@@ -75,7 +75,7 @@ export async function runUninstall(deps: UninstallDeps, o: UninstallOptions = {}
   ];
 
   // 1. user presence (§9.2): nothing changes without the human
-  const pr = await deps.presence.check(o.purgeData ? 'remove agentbridge and delete its data from this Mac' : 'remove agentbridge from this Mac');
+  const pr = await deps.presence.check(o.purgeData ? 'uninstall itself and delete all its data' : 'uninstall itself from this Mac');
   if (!pr.ok) {
     step({ id: 'presence', status: 'failed', detail: `user presence check failed (${pr.code}${pr.detail ? `: ${pr.detail}` : ''}); nothing was changed`, fix: pr.code === 'unavailable' ? 'the Touch ID helper is missing; follow the manual steps in docs/troubleshooting.md ("Uninstall")' : 'run agentbridge uninstall again and approve the Touch ID / password prompt' });
     return { ok: false, steps, manual: [] };

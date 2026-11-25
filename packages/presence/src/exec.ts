@@ -36,8 +36,11 @@ export const run: Runner = (file, args, opts = {}) =>
     child.stdin.end(opts.input ?? '');
   });
 
-/** Default location of the helper: <package>/bin/agentbridge-helper (same from src/ and dist/). */
-export const DEFAULT_HELPER_PATH = fileURLToPath(new URL('../bin/agentbridge-helper', import.meta.url));
+/**
+ * Default location of the helper: the executable inside <package>/bin/AgentBridge.app (same from src/ and dist/).
+ * It must run from inside the bundle: that is what makes the Touch ID and keychain dialogs say "AgentBridge".
+ */
+export const DEFAULT_HELPER_PATH = fileURLToPath(new URL('../bin/AgentBridge.app/Contents/MacOS/AgentBridge', import.meta.url));
 
 export class HelperError extends Error {
   override name = 'HelperError';
@@ -60,16 +63,16 @@ export async function callHelper(
     // Minimal env: the helper needs nothing from ours, and nothing secret ever goes there.
     r = await runner(helperPath, [sub], { input: encodeHelperRequest(req), env: { PATH: '/usr/bin:/bin' }, ...(opts.timeoutMs === undefined ? {} : { timeoutMs: opts.timeoutMs }) });
   } catch (e) {
-    throw new HelperError(`cannot run agentbridge-helper at ${helperPath}: ${(e as Error).message}`);
+    throw new HelperError(`cannot run the AgentBridge helper at ${helperPath}: ${(e as Error).message}`);
   }
-  if (r.timedOut) throw new HelperError(`agentbridge-helper ${sub} timed out`);
-  if (r.signal !== null) throw new HelperError(`agentbridge-helper ${sub} killed by ${r.signal}`);
+  if (r.timedOut) throw new HelperError(`AgentBridge helper ${sub} timed out`);
+  if (r.signal !== null) throw new HelperError(`AgentBridge helper ${sub} killed by ${r.signal}`);
   let res: HelperResponse;
   try {
     res = parseHelperResponse(r.stdout);
   } catch (e) {
-    throw new HelperError(`agentbridge-helper ${sub} (exit ${r.code}): ${(e as Error).message}`);
+    throw new HelperError(`AgentBridge helper ${sub} (exit ${r.code}): ${(e as Error).message}`);
   }
-  if (r.code !== 0 && res.ok) throw new HelperError(`agentbridge-helper ${sub} exited ${r.code} with ok:true`);
+  if (r.code !== 0 && res.ok) throw new HelperError(`AgentBridge helper ${sub} exited ${r.code} with ok:true`);
   return res;
 }

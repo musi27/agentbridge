@@ -87,7 +87,7 @@ test('uninstall: removes plugin, marketplace, launchd agent, bridge and deny rul
   const r = await runUninstall(w.deps);
   assert.equal(r.ok, true, w.lines.join('\n'));
   assert.deepEqual(status(r), { plugin: 'removed', marketplace: 'removed', launchd: 'removed', bridge: 'removed', deny_rules: 'removed', keychain: 'left', data: 'left' });
-  assert.deepEqual(w.presence.reasons, ['remove agentbridge from this Mac']);
+  assert.deepEqual(w.presence.reasons, ['uninstall itself from this Mac']);
   assert.deepEqual(w.claudeCalls, [['plugin', 'uninstall', PLUGIN_ID, '--scope', 'user'], ['plugin', 'marketplace', 'remove', 'agentbridge']]);
   assert.deepEqual(w.events, ['marker write', 'claude plugin uninstall', 'claude plugin marketplace', 'launchd uninstall', 'stop 4242', 'marker remove']);
   assert.equal(existsSync(w.plist), false);
@@ -116,7 +116,7 @@ test('uninstall --purge-data: deletes the keychain items (incl. per-bot ones fro
   assert.deepEqual([...w.secrets.map.keys()], ['unrelated']);
   assert.equal(existsSync(w.paths.root), false);
   assert.ok(!w.events.includes('marker remove'), 'the marker went with the folder');
-  assert.deepEqual(w.presence.reasons, ['remove agentbridge and delete its data from this Mac']);
+  assert.deepEqual(w.presence.reasons, ['uninstall itself and delete all its data']);
   assert.match(w.lines.join('\n'), /removed {2}11 Keychain items under service "agentbridge"/);
 
   // second run: everything already gone, nothing fails

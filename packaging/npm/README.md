@@ -40,7 +40,7 @@ service and the deny rules, and prints what is left for you to do in Grok (delet
 
 ## Notes
 
-- The bundled `agentbridge-helper` (Touch ID and keychain access) is ad-hoc signed, not notarized. npm installs are not
+- The bundled `AgentBridge.app` (Touch ID and keychain access; a background app with no Dock icon) is ad-hoc signed, not notarized. npm installs are not
   quarantined, so it runs as is. If you copy the package from a browser download, macOS Gatekeeper will block the helper
   until you remove the quarantine attribute.
 - `agentbridge doctor` diagnoses setup problems; `agentbridge status` shows sessions, conversations and pending approvals;

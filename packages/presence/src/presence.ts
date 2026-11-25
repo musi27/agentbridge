@@ -26,7 +26,7 @@ export class MacPresenceChecker implements PresenceChecker {
   }
 
   async #checkOne(reason: string): Promise<PresenceResult> {
-    // The OS shows "<app> is trying to <reason>." Keep it one short line.
+    // The OS shows "AgentBridge is trying to <reason>." Keep it one short line.
     // Truncate by code point: slicing UTF-16 could leave a lone surrogate, which the helper rejects as invalid JSON.
     const clean = truncateChars(reason.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim(), MAX_REASON);
     if (clean === '') return { ok: false, code: 'error', detail: 'empty reason' };

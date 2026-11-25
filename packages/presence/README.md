@@ -16,7 +16,7 @@ macOS platform layer for the bridge. It implements the interfaces in
 
 - `createSecretStore()` and `createPresenceChecker()` first run `verifyHelper()`, which checks
   that the helper exists and answers `version` with protocol 1. If not, they throw
-  `HelperMissingError`: "agentbridge-helper missing at … ; run the build: npm run build:helper -w
+  `HelperMissingError`: "AgentBridge helper missing at … ; run the build: npm run build:helper -w
   @agentbridge/presence". `doctor` can show this message as is.
 - `createNotifier({ launchd?: 'show' | 'defer' })` returns the osascript notifier. It **posts in
   every context, including the launchd agent** (default `'show'`; the re-probe below showed the
@@ -37,13 +37,37 @@ macOS platform layer for the bridge. It implements the interfaces in
 Package exports carry the repo-wide `agentbridge-source` condition, which points at
 `src/index.ts`. Tests run with `node --conditions=agentbridge-source`.
 
-## The native helper
+## The native helper: `AgentBridge.app`
 
-`native/main.swift` builds to `bin/agentbridge-helper`: one universal (arm64 + x86_64) binary,
-ad-hoc signed with the identifier `live.musi.agentbridge.helper`. Each call works like this:
+`native/build.sh` builds `bin/AgentBridge.app`, a background app bundle:
+
+- `Contents/MacOS/AgentBridge`: `native/main.swift` as one universal (arm64 + x86_64) binary
+- `Contents/Info.plist`: copied from `native/Info.plist`. Bundle id `live.musi.agentbridge`, name
+  "AgentBridge", `LSUIElement` (no Dock icon, no menu bar). It is a fixed file with no version
+  stamped in, so the ad-hoc cdhash only changes when the code, plist or icon does.
+- `Contents/Resources/AppIcon.icns`: the icon (direction "08 The gap", graphite)
+
+The whole bundle is ad-hoc signed with the identifier `live.musi.agentbridge`. Because the
+executable runs from inside the bundle, macOS dialogs name it **"AgentBridge"** and show its icon:
+"AgentBridge is trying to ⟨reason⟩." The bridge always runs it by its full path
+(`DEFAULT_HELPER_PATH`); it is never opened with `open` or LaunchServices. Later the same bundle is
+meant to host notifications (docs/notifications.md) and the agent panel.
+
+`AppIcon.icns` is committed. To regenerate it from the 1024 px master PNG:
+
+```bash
+mkdir AppIcon.iconset
+for s in 16 32 128 256 512; do
+  sips -z $s $s icon-1024.png --out AppIcon.iconset/icon_${s}x${s}.png
+  sips -z $((s*2)) $((s*2)) icon-1024.png --out AppIcon.iconset/icon_${s}x${s}@2x.png
+done
+iconutil -c icns AppIcon.iconset -o native/AppIcon.icns
+```
+
+Each call works like this:
 
 ```
-agentbridge-helper <subcommand>   # argv carries only the subcommand
+AgentBridge <subcommand>          # argv carries only the subcommand
 stdin:  one JSON object           # e.g. {"service":"agentbridge","account":"bot.r.token","value":"…"}
 stdout: one JSON line             # {"ok":true,…} | {"ok":false,…}
 exit:   0 = a response was written (even ok:false); 2 = usage or protocol error
@@ -98,9 +122,11 @@ trusting itself) cannot capture the secret. This is tested by pre-seeding a fore
 add loses the old value.
 
 The item ACL trusts the binary that created it. With an
-ad-hoc signature, that identity is the binary's cdhash, so **after a rebuild or update of the
-helper, the first access shows a macOS "agentbridge-helper wants to use your confidential
-information" prompt**. A Developer ID signature fixes this (see
+ad-hoc signature, that identity is the bundle's cdhash (the identifier is not part of it), so
+**after a change to the helper's code, Info.plist or icon, the first access to each item shows a
+macOS "AgentBridge wants to use your confidential information" prompt**. Moving from the bare
+`agentbridge-helper` into `AgentBridge.app` was one such change; a copy of the same build at
+another path is not. A Developer ID signature fixes this (see
 [docs/release-signing.md](../../docs/release-signing.md)).
 
 **Notifications:** title, body and subtitle are passed to `osascript` as argv items **after `--`**
@@ -127,8 +153,9 @@ toolchain (two builds gave the same SHA-1), but it is not committed because:
 3. A committed binary that handles Touch ID and the keychain is opaque to review. Building from
    the 150-line Swift source keeps what runs auditable.
 
-End users never need Swift. The npm release tarball ships a prebuilt, signed, notarised
-`bin/agentbridge-helper` (`files` includes `bin`).
+End users never need Swift. The npm release tarball ships a prebuilt, ad-hoc signed
+`bin/AgentBridge.app` (`files` includes `bin`); Developer ID signing and notarisation come later
+(TODO item 10).
 
 ## Tests
 
@@ -172,9 +199,9 @@ With `--notify-only` it posts one notification after 5 s and nothing else.
 
 - **Context confirmed as launchd:** ppid 1, no TTY, `XPC_SERVICE_NAME = live.musi.agentbridge.probe`,
   `PATH` from the plist.
-- **Presence: works.** `{ok:true}` on every approved run (1.9–55 s). The dialog reads
+- **Presence: works.** `{ok:true}` on every approved run (1.9–55 s). The dialog read
   **"agentbridge-helper is trying to ⟨reason⟩."** (owner screenshot), so **reasons must be verb
-  phrases**. A future `AgentBridge.app` would show a proper name and icon (docs/notifications.md).
+  phrases**. Since `AgentBridge.app` it reads "AgentBridge is trying to ⟨reason⟩." with the icon.
 - **Helper-enforced timeout: works.** `stage: "timeout"` after 4.04 s from launchd and 4.08 s
   from a shell. The owner confirmed the dialog closed by itself.
 - **Keychain round trip: works** (set/get/delete) from launchd, with no prompt.
@@ -222,5 +249,6 @@ Results:
 
 Follow-up done in the same PR: the run showed the bridge's reason rendering as
 "agentbridge-helper is trying to agentbridge: change setting limits.turns." `presenceReason()` in
-`packages/bridge/src/ipc/cli-methods.ts` now builds lowercase verb phrases with no prefix, such as
-"change the agentbridge setting limits.turns". A test checks every privileged method.
+`packages/bridge/src/ipc/cli-methods.ts` now builds lowercase verb phrases with no prefix. Since
+`AgentBridge.app` the dialog already names the app, so reasons don't repeat it: "AgentBridge is
+trying to change its setting limits.turns." A test checks every privileged method.

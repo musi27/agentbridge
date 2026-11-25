@@ -39,9 +39,14 @@ in `gui/501`: ppid 1, no TTY, `XPC_SERVICE_NAME = live.musi.agentbridge.probe`.
    notifications for Script Editor, which means nothing to them, and turning it off for another
    reason silently kills agentbridge popups.
 3. **No actions.** No "Approve" / "Open" buttons; clicking opens Script Editor.
-4. The Touch ID dialog likewise says "agentbridge-helper" with a generic exec icon.
+4. The Touch ID dialog used to say "agentbridge-helper" with a generic exec icon. Fixed by the
+   first step below: the helper now runs inside `AgentBridge.app`.
 
 ## Proposal: `AgentBridge.app`, a small background app bundle
+
+**Status:** the bundle exists (TODO item 15): `bin/AgentBridge.app` in the npm package, built by
+`packages/presence/native/build.sh`, ad-hoc signed, hosting the presence and keychain helper.
+Notifications below are not built yet; osascript is still the notifier.
 
 A minimal `LSUIElement` app (no Dock icon, no menu bar) that replaces osascript and, ideally,
 also hosts the presence and keychain helper.
@@ -57,7 +62,7 @@ also hosts the presence and keychain helper.
   - The app gets its own row in System Settings → Notifications as "AgentBridge".
 - **IPC:** the bridge launches it per request (`open -g -a … --args <subcommand>`, or exec of
   `Contents/MacOS/AgentBridge`) with the same one-JSON-request-on-stdin protocol as
-  `agentbridge-helper` today. Alternatively a tiny launchd-managed XPC service. Start with exec:
+  the helper in the bundle today. Alternatively a tiny launchd-managed XPC service. Start with exec:
   it is what we have and it works from launchd.
   - `UNUserNotificationCenter` requires a bundle. Running the bundle's executable directly from
     the service works as long as it is inside a signed `.app` with a bundle id. Spike first.
@@ -66,7 +71,7 @@ also hosts the presence and keychain helper.
   - keychain ACLs trust one signed identity
   - there is one artefact to sign and notarise instead of two
   
-  `bin/agentbridge-helper` stays as a symlink or thin shim for compatibility.
+  Done for presence and keychain: no shim was kept, since nothing outside the package calls the helper.
 - **Delivery semantics for the bridge:** `notify()` resolves only when
   `UNUserNotificationCenter.add` succeeds **and** settings say alerts are enabled. Otherwise it
   throws, and §9.1 falls back to the next CLI call. Still not proof of attention, but no longer
@@ -82,9 +87,10 @@ also hosts the presence and keychain helper.
   of the `.app` with `notarytool`. **Staple** the ticket to the `.app` (`xcrun stapler staple
   AgentBridge.app`). Unlike the bare helper, a bundle can be stapled, so Gatekeeper checks pass
   offline.
-- Moving from the ad-hoc `agentbridge-helper` to the signed app changes the keychain-trusted
-  identity. Existing items prompt once per item ("AgentBridge wants to use…"), unless `init`
-  re-creates them. keychain-set's delete-then-add already does this when secrets are rewritten.
+- Moving from the ad-hoc `agentbridge-helper` to the ad-hoc `AgentBridge.app` changed the
+  keychain-trusted identity: existing items prompt once per item ("AgentBridge wants to use…").
+  Moving to a Developer ID signature will do it once more. keychain-set's delete-then-add re-creates
+  an item with the new identity whenever a secret is rewritten. Details: release-signing.md.
 - No entitlements are needed (no sandbox; LocalAuthentication, legacy keychain and notifications
   all work without them).
 - See [release-signing.md](release-signing.md).

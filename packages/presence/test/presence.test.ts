@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { MacPresenceChecker } from '../src/presence.ts';
 import type { Runner } from '../src/exec.ts';
 
-/** A stub agentbridge-helper: records argv/stdin/env, replies with response.json, exits with `code`. */
+/** A stub helper executable: records argv/stdin/env, replies with response.json, exits with `code`. */
 function stubHelper(response: string, opts: { exitCode?: number; sleep?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ab-presence-'));
   const bin = join(dir, 'agentbridge-helper');

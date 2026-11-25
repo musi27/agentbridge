@@ -63,30 +63,30 @@ const NOT_YET: ReadonlySet<CliMethod> = new Set(['cli.identity_rotate']);
 const isFollowUp = (m: CliMethod, p: Record<string, unknown>): boolean => (m === 'cli.add_grok' || m === 'cli.revoke') && p['step'] !== undefined && p['step'] !== 'begin';
 
 /**
- * Reason shown in the Touch ID dialog. macOS renders it as "<app> is trying to <reason>.", so it
- * must be a lowercase verb phrase with no "agentbridge:" prefix.
+ * Reason shown in the Touch ID dialog. macOS renders it as "AgentBridge is trying to <reason>.", so
+ * it is a lowercase verb phrase that doesn't name agentbridge again ("its", "itself" refer to the app).
  */
 export function presenceReason(m: CliMethod, p: Record<string, unknown>, engine: Pick<Engine, 'approvals'>): string {
   switch (m) {
     case 'cli.approve': {
       const a = engine.approvals.get(String(p['approval_id']));
-      if (!a) return 'approve an agentbridge request';
-      const what = a.facts.kind === 'extend' ? 'a longer agentbridge conversation' : 'an agentbridge conversation';
-      return `approve ${what} with ${a.facts.peer} (turn limit ${a.facts.turn_limit})`;
+      if (!a) return 'allow a request';
+      const what = a.facts.kind === 'extend' ? 'a longer conversation' : 'a conversation';
+      return `approve ${what} with ${a.facts.peer}, up to ${a.facts.turn_limit} turns`;
     }
-    case 'cli.decline': return 'decline an agentbridge request';
-    case 'cli.config_set': return `change the agentbridge setting ${String(p['key'])}`;
-    case 'cli.config_verify': return 'verify the agentbridge policy';
-    case 'cli.show': return 'show an agentbridge transcript';
-    case 'cli.end': return 'end agentbridge conversations';
-    case 'cli.extend': return 'raise an agentbridge turn limit';
-    case 'cli.stop': return 'stop the agentbridge service';
-    case 'cli.remove': return `remove ${String(p['address'])} from agentbridge`;
-    case 'cli.purge': return 'delete ended agentbridge transcripts';
-    case 'cli.revoke': return `revoke the agentbridge token of ${String(p['address'] ?? 'a bot')} and make a new one`;
-    case 'cli.add_grok': return 'add a Grok bot to agentbridge';
-    case 'cli.identity_rotate': return 'rotate the agentbridge identity keys';
-    default: return `run the agentbridge command ${m.slice(4).replace(/_/g, ' ')}`;
+    case 'cli.decline': return 'decline a request';
+    case 'cli.config_set': return `change its setting ${String(p['key'])}`;
+    case 'cli.config_verify': return 'check its policy';
+    case 'cli.show': return 'show a conversation transcript';
+    case 'cli.end': return 'end its conversations';
+    case 'cli.extend': return "raise a conversation's turn limit";
+    case 'cli.stop': return 'stop its background service';
+    case 'cli.remove': return `remove ${String(p['address'])} from its agents`;
+    case 'cli.purge': return 'delete its ended transcripts';
+    case 'cli.revoke': return `replace the token of ${String(p['address'] ?? 'a bot')} with a new one`;
+    case 'cli.add_grok': return 'add a Grok bot to its agents';
+    case 'cli.identity_rotate': return 'rotate its identity keys';
+    default: return `run the command ${m.slice(4).replace(/_/g, ' ')}`;
   }
 }
 

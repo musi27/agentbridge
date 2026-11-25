@@ -10,12 +10,20 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Release notes file exists (docs/release-notes/<tag>.md)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          notes="docs/release-notes/${GITHUB_REF_NAME}.md"
+          if [ ! -s "$notes" ] || ! grep -q '[^[:space:]]' "$notes"; then
+            echo "::error file=$notes::Missing or empty release notes: $notes. Write it in the release PR (see docs/release-notes/README.md and docs/releasing.md); no release is drafted without it."
+            exit 1
+          fi
       - uses: actions/setup-node@v4
         with: { node-version: 24, cache: npm }
       - run: npm ci
       - run: npm run check
       - name: Build the helper fresh (universal, ad-hoc signed)
-        run: rm -f packages/presence/bin/agentbridge-helper && npm run build:helper -w @agentbridge/presence
+        run: rm -rf packages/presence/bin && npm run build:helper -w @agentbridge/presence
       - name: Build, pack and verify the npm package
         run: npm run pack:release
       - name: Tag matches the package version
@@ -32,4 +40,9 @@ jobs:
         run: |
           gh release create "${GITHUB_REF_NAME}" packaging/npm/out/musi27-agentbridge-*.tgz --draft \
             --title "agentbridge ${GITHUB_REF_NAME}" \
-            --notes "npm tarball verified in CI. Publish it with npm publish musi27-agentbridge-${GITHUB_REF_NAME#v}.tgz --access public (see docs/releasing.md)."
+            --notes-file "docs/release-notes/${GITHUB_REF_NAME}.md"
+          {
+            echo "### Draft release ${GITHUB_REF_NAME} created"
+            echo
+            echo "npm tarball verified in CI. Publish it with \`npm publish musi27-agentbridge-${GITHUB_REF_NAME#v}.tgz --access public\` (see docs/releasing.md)."
+          } >> "$GITHUB_STEP_SUMMARY"

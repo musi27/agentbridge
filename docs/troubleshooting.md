@@ -212,6 +212,19 @@ transport.relay_mode always` keeps it connected permanently (see [self-hosting.m
 
 Messages held at the relay expire after 7 days. If any expire, both you (notification) and Grok (a notice) are told.
 
+## After an upgrade, macOS asks to use the "agentbridge" keychain items
+
+**Symptom.** After `npm install -g @musi27/agentbridge` and `agentbridge init`, macOS shows one or more dialogs:
+"AgentBridge wants to use your confidential information stored in "agentbridge" in your keychain."
+
+**Cause.** The helper (`AgentBridge.app`) is ad-hoc signed, without an Apple Developer ID. The keychain trusts the
+exact build that saved each item, so a release that changes the helper's code asks once per item: the identity keys,
+the policy key, version and snapshot, and three items per Grok bot. The first release with `AgentBridge.app` is
+one of those.
+
+**Fix.** Enter your login password and choose **Always Allow** in each dialog. **Deny** makes that read fail, so the
+command or the bridge stops with a keychain error. Run it again (`agentbridge init` restarts the bridge) and allow it.
+
 ## Touch ID is unavailable
 
 Privileged commands use macOS LocalAuthentication with `deviceOwnerAuthentication`: Touch ID, **falling back to your
@@ -223,7 +236,7 @@ macOS account password**. You don't need Touch ID hardware; the password dialog 
 | Authentication failed | The fingerprint or password wasn't accepted | Run the command again. |
 | Cancelled by the system | macOS interrupted the dialog, for example by locking the screen or switching users | Unlock and run the command again. |
 | Not available | LocalAuthentication can't run on this Mac or in this context | Check that your account has a login password, then run `agentbridge doctor`. |
-| Helper missing | The Touch ID helper (`agentbridge-helper`) wasn't found | The npm package ships it prebuilt; reinstall with `npm install -g @musi27/agentbridge`. From source, build it with `npm run build:helper -w @agentbridge/presence`. Then run `agentbridge doctor`. |
+| Helper missing | The Touch ID helper (`AgentBridge.app` in the package's `bin/`) wasn't found | The npm package ships it prebuilt; reinstall with `npm install -g @musi27/agentbridge`. From source, build it with `npm run build:helper -w @agentbridge/presence`. Then run `agentbridge doctor`. |
 
 Without a working presence check, the bridge refuses privileged commands. Conversations keep working.
 

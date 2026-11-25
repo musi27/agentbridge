@@ -1,7 +1,7 @@
 // One release version everywhere (CLI, bridge, plugin, npm package) and the upgrade checks built on it (§14.1).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BRIDGE_VERSION, versionMismatch } from '../src/version.ts';
@@ -16,6 +16,12 @@ test('release version: npm package.json = BRIDGE_VERSION = plugin.json (engine r
   assert.equal(json('adapters/claude-code/plugin/.claude-plugin/plugin.json').version, BRIDGE_VERSION);
   assert.equal(ENGINE_VERSION, BRIDGE_VERSION);
   assert.match(readFileSync(join(repo, 'README.md'), 'utf8'), new RegExp(`Status: v${BRIDGE_VERSION.replaceAll('.', '\\.')}\\b`), 'README status line names the release');
+});
+
+test('release notes: docs/release-notes/v<version>.md exists and is not empty (the release workflow uses it as the body)', () => {
+  const notes = join(repo, 'docs', 'release-notes', `v${json('packaging/npm/package.json').version}.md`);
+  assert.ok(existsSync(notes), `missing ${notes}: write it in the release PR (docs/releasing.md)`);
+  assert.match(readFileSync(notes, 'utf8'), /\S/, `${notes} is empty`);
 });
 
 test('versionMismatch / versionCheck: null when equal or unknown; a fix when they differ', () => {

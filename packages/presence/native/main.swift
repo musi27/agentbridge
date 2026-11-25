@@ -1,6 +1,7 @@
-// agentbridge-helper: macOS platform helper for the agentbridge bridge (SPEC §9.2, §15.5).
+// AgentBridge.app's executable: macOS platform helper for the agentbridge bridge (SPEC §9.2, §15.5).
+// Built into a background (LSUIElement) bundle by native/build.sh, so macOS dialogs name "AgentBridge".
 //
-// Protocol: `agentbridge-helper <subcommand>`; exactly one JSON object on stdin; exactly one JSON
+// Protocol: `AgentBridge.app/Contents/MacOS/AgentBridge <subcommand>`; exactly one JSON object on stdin; exactly one JSON
 // object on stdout; exit 0 whenever a well-formed response was written (even {"ok":false}), 2 on
 // a usage/protocol error (the response still says why). Secret values travel only over
 // stdin/stdout, never argv or env, and are never written to stderr.
@@ -166,7 +167,7 @@ func keychainDelete(_ req: [String: Any]) -> Never {
 // MARK: main
 
 let args = CommandLine.arguments
-guard args.count == 2 else { fail("bad_request", "usage: agentbridge-helper <subcommand> < request.json", exitCode: 2) }
+guard args.count == 2 else { fail("bad_request", "usage: AgentBridge <subcommand> < request.json", exitCode: 2) }
 let sub = args[1]
 let known = ["presence", "keychain-get", "keychain-set", "keychain-delete", "version"]
 guard known.contains(sub) else { fail("unknown_subcommand", "unknown subcommand: \(sub)", exitCode: 2) }

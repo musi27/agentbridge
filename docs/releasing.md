@@ -10,7 +10,8 @@ publishes the verified tarball by hand.
   bundles, with every workspace package and dependency inlined. The tarball declares no dependencies.
 - `plugin/` and `.claude-plugin/marketplace.json`: the Claude Code plugin (its runtime is the bundle committed in
   `adapters/claude-code/plugin/runtime`). `agentbridge init` runs `claude plugin marketplace add <installed package>`.
-- `bin/agentbridge-helper`: the Swift helper for Touch ID and the keychain, universal (arm64 + x86_64), **ad-hoc signed**
+- `bin/AgentBridge.app`: background app bundle (`live.musi.agentbridge`, no Dock icon) whose executable is the Swift
+  helper for Touch ID and the keychain, universal (arm64 + x86_64), the whole bundle **ad-hoc signed**
   (no Apple Developer ID yet; see [release-signing.md](release-signing.md)). npm installs are not quarantined, so it
   runs. A copy downloaded with a browser would be quarantined and blocked by Gatekeeper.
 
@@ -37,10 +38,16 @@ contents summary.
    - `PLUGIN_VERSION` in `adapters/claude-code/src/version.ts` and `version` in
      `adapters/claude-code/plugin/.claude-plugin/plugin.json`, then `npm run build:plugin -w @agentbridge/adapter-claude-code`
    - the README status line (`Status: vX.Y.Z`)
+   - write the release notes, `docs/release-notes/vX.Y.Z.md`, in the format described in
+     [release-notes/README.md](release-notes/README.md). They become the GitHub release body as written, so write them
+     for users. `npm run check` fails if the file for the version in `packaging/npm/package.json` is missing or empty.
 2. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`. The [release workflow](../.github/workflows/release.yml)
-   runs `npm ci`, `npm run check`, builds the helper fresh (universal, ad-hoc), builds and verifies the package, and
-   creates a **draft** GitHub release with `musi27-agentbridge-0.1.0.tgz` attached. (Manual runs from the Actions tab build
-   and verify the tarball and upload it as a workflow artifact.)
+   first checks that `docs/release-notes/v0.1.0.md` exists and isn't empty, and **fails before building anything if it
+   doesn't**, so no release goes out with a placeholder body. It then runs `npm ci`, `npm run check`, builds the helper
+   fresh (universal, ad-hoc), builds and verifies the package, and creates a **draft** GitHub release with
+   `musi27-agentbridge-0.1.0.tgz` attached and the notes file as its body. The `npm publish` command for the tarball is
+   printed in the run's summary. (Manual runs from the Actions tab skip the notes check, build and verify the tarball,
+   and upload it as a workflow artifact.)
 3. Download the tarball from the draft release and, optionally, verify it again on your Mac:
    `node packaging/npm/scripts/verify.ts musi27-agentbridge-0.1.0.tgz`.
 
@@ -51,5 +58,6 @@ npm login
 npm publish musi27-agentbridge-0.1.0.tgz --access public
 ```
 
-Then publish the GitHub release draft. Publishing the exact tarball CI verified (rather than running `npm publish` in a
-checkout) keeps what users install identical to what was tested.
+Then publish the GitHub release draft; its body is already the committed release notes, so there is nothing to edit.
+Publishing the exact tarball CI verified (rather than running `npm publish` in a checkout) keeps what users install
+identical to what was tested.

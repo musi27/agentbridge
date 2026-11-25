@@ -11,7 +11,7 @@ const reply = (stdout: string, code = 0): Runner => async () => ({ code, signal:
 test('missing helper → HelperMissingError telling the user to run the build', async (t) => {
   if (process.platform !== 'darwin') return t.skip('macOS only');
   for (const p of [verifyHelper({ helperPath: '/nonexistent/agentbridge-helper' }), createSecretStore({ helperPath: '/nonexistent/agentbridge-helper' }), createPresenceChecker({ helperPath: '/nonexistent/agentbridge-helper' })]) {
-    await assert.rejects(p, (e: unknown) => e instanceof HelperMissingError && /agentbridge-helper missing at \/nonexistent.*run the build/.test(e.message));
+    await assert.rejects(p, (e: unknown) => e instanceof HelperMissingError && /AgentBridge helper missing at \/nonexistent.*run the build/.test(e.message));
   }
 });
 

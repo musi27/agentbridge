@@ -200,7 +200,7 @@ test('cli.add_grok / cli.revoke / cli.doctor: presence only for the first step; 
   assert.equal((await cli('cli.revoke', { step: 'check', setup_id: b.setup_id })).error?.code, 'not_allowed');
   assert.equal((await cli('cli.revoke', { address: 'grok:researcher' })).error?.code, 'unauthenticated');
   x.h.presence.answer = { ok: true, method: 'biometric_or_password' };
-  assert.match(x.h.presence.reasons.at(-1)!, /revoke the agentbridge token of grok:researcher/);
+  assert.match(x.h.presence.reasons.at(-1)!, /replace the token of grok:researcher with a new one/);
   const rv = (await cli('cli.revoke', { address: 'grok:researcher' })).result as { setup_id: string; token: string };
   assert.ok(rv.token);
   assert.equal(((await cli('cli.revoke', { step: 'check', setup_id: rv.setup_id })).result as { ok: boolean }).ok, true);
