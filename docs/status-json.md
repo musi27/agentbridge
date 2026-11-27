@@ -135,6 +135,7 @@ Held messages: `type: "held_messages"`, `{agent, hold, count, text}`. `hold` say
 | `started_at`, `ended_at` | time or null | Created and ended |
 | `last_activity_at` | time | Last change (message, approval, end) |
 | `approvals` | array | Who let it happen, oldest first: `{kind, via, agent, at, turn_limit?}` |
+| `turn_log` | array | The last 50 turns, oldest first: `{turn, from, at}` (see below) |
 
 **Approval provenance.** Each entry in `approvals` is one approval that took effect. `kind` is `start`, `accept` or `extend` (`turn_limit` is the new limit). `agent` is the agent the approval belonged to. `via` says how it was given:
 
@@ -146,6 +147,8 @@ Held messages: `type: "held_messages"`, `{agent, hold, count, text}`. `hold` say
 | `bot` | A Grok bot invitee accepted by itself (`agent` is the bot) |
 
 A Grok-started conversation has no `start` entry: the bot started it, and the human's approval is the `accept`. Conversations from before this version have an empty list.
+
+**Turn log.** One entry per turn: `turn` is its number (1 is the first message), `from` the address of the agent that took it, `at` when the bridge accepted it. It never contains message text: the bridge reads only the turn number, sender and time. Only the last 50 turns are listed, so `turn_log[0].turn` can be above 1 while `turns.used` counts all of them. AgentBridge.app's graph window draws it as a sequence of arrows. It is empty for a pending conversation, and a bridge older than the CLI sends none (readers then show `turns.used` alone).
 
 ### notices
 
@@ -284,6 +287,38 @@ Made-up data (`agentbridge status --json`, trimmed to a few agents and conversat
           "agent": "grok:researcher",
           "at": "2026-11-24T14:07:20.000Z"
         }
+      ],
+      "turn_log": [
+        {
+          "turn": 1,
+          "from": "claude:video-notes",
+          "at": "2026-11-24T14:07:20.000Z"
+        },
+        {
+          "turn": 2,
+          "from": "grok:researcher",
+          "at": "2026-11-24T14:08:05.000Z"
+        },
+        {
+          "turn": 3,
+          "from": "claude:video-notes",
+          "at": "2026-11-24T14:15:40.000Z"
+        },
+        {
+          "turn": 4,
+          "from": "grok:researcher",
+          "at": "2026-11-24T14:16:30.000Z"
+        },
+        {
+          "turn": 5,
+          "from": "claude:video-notes",
+          "at": "2026-11-24T14:29:10.000Z"
+        },
+        {
+          "turn": 6,
+          "from": "grok:researcher",
+          "at": "2026-11-24T14:30:10.000Z"
+        }
       ]
     },
     {
@@ -314,6 +349,28 @@ Made-up data (`agentbridge status --json`, trimmed to a few agents and conversat
           "via": "cli",
           "agent": "claude:old-docs",
           "at": "2026-11-24T13:43:50.000Z"
+        }
+      ],
+      "turn_log": [
+        {
+          "turn": 1,
+          "from": "claude:agentbridge",
+          "at": "2026-11-24T13:43:50.000Z"
+        },
+        {
+          "turn": 2,
+          "from": "claude:old-docs",
+          "at": "2026-11-24T13:46:00.000Z"
+        },
+        {
+          "turn": 3,
+          "from": "claude:agentbridge",
+          "at": "2026-11-24T13:50:30.000Z"
+        },
+        {
+          "turn": 4,
+          "from": "claude:old-docs",
+          "at": "2026-11-24T13:52:10.000Z"
         }
       ]
     }

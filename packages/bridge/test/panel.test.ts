@@ -80,6 +80,52 @@ test('panel render: matches the mockup layout and cuts long lines to the width',
   for (const l of renderPanel(view(s), { width: 60 })) assert.ok([...l].length <= 60, l);
 });
 
+// A team bigger than a short terminal: 30 more live agents and 8 more conversations.
+function tallStatus() {
+  const s = fixtureStatus();
+  for (let i = 0; i < 30; i++) s.participants.push({ address: `claude:extra-${String(i).padStart(2, '0')}`, short_id: `e${i}`, state: 'live', permission_mode: 'default', folder: 'extra' });
+  for (let i = 0; i < 8; i++) s.conversation_list!.push({ id: `01JEXTRA${i}`, initiator: `claude:extra-${i}`, invitee: 'grok:researcher', topic: `extra topic ${i}`, state: 'active', turn_count: 1, turn_limit: 10, origin: 'local', queued: false, updated_at: new Date(NOW - (600 + i) * 1000).toISOString() });
+  return s;
+}
+
+test('panel render: height fits the frame, shortening agents, then notices, then conversations', () => {
+  // fits already: the same lines as without a height
+  assert.deepEqual(renderPanel(view(), { width: 100, clock: 'x', height: 200 }), renderPanel(view(), { width: 100, clock: 'x' }));
+
+  const full = renderPanel(view(tallStatus()), { width: 100 });
+  const lines = renderPanel(view(tallStatus()), { width: 100, height: 40 });
+  const text = lines.join('\n');
+  assert.ok(full.length > 40); assert.equal(lines.length, 40);
+  assert.match(lines[0]!, /^agentbridge 0\.2\.3/);
+  assert.match(text, /WAITING ON YOU\n ● accept: grok:researcher → codex:trading-bot/); // stays whole
+  assert.match(text, /^ {3}\+ \d+ more$/m); // agents were cut…
+  assert.match(text, /\+ 3 closed/);
+  assert.equal((text.match(/◆/g) ?? []).length, 10); // …while every conversation still shows
+  assert.match(text, /^NOTICES/m);
+
+  // very short: agents and notices go, then conversations; the header and WAITING ON YOU come first
+  const short = renderPanel(view(tallStatus()), { width: 100, height: 22 });
+  assert.equal(short.length, 22);
+  assert.doesNotMatch(short.join('\n'), /^ ● claude:extra-/m);
+  assert.ok((short.join('\n').match(/◆/g) ?? []).length < 10);
+  const tiny = renderPanel(view(tallStatus()), { width: 100, height: 3 });
+  assert.equal(tiny.length, 3); assert.match(tiny[0]!, /^agentbridge/);
+});
+
+test('watch: a panel taller than the terminal is fitted to its rows, so redraws never scroll', async () => {
+  const out: string[] = []; let calls = 0; let stop!: () => void;
+  const stopped = new Promise<void>((r) => { stop = r; });
+  await runWatch({
+    fetch: async () => { calls++; return tallStatus(); },
+    out: { isTTY: true, columns: 120, rows: 30, write: (s) => out.push(s) }, cliVersion: '0.2.3', now: () => NOW, stopped,
+    sleep: async () => { if (calls >= 2) stop(); await Promise.resolve(); },
+  });
+  const frames = out.slice(1, -1);
+  assert.equal(frames.length, 2);
+  // each line ends with erase-to-end and a newline; the cursor must end on a row inside the terminal
+  for (const f of frames) { assert.ok(f.split('\n').length <= 30, `${f.split('\n').length} rows`); assert.match(f, /WAITING ON YOU/); assert.match(f, /Ctrl-C to quit/); }
+});
+
 test('watch: without a TTY prints one snapshot and returns', async () => {
   const out: string[] = []; let calls = 0;
   const code = await runWatch({ fetch: async () => { calls++; return fixtureStatus(); }, out: { isTTY: false, write: (s) => out.push(s) }, cliVersion: '0.2.3', now: () => NOW });

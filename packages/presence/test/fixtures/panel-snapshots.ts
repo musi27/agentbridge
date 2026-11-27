@@ -56,7 +56,7 @@ export function small(): Record<string, unknown> {
   };
 }
 
-/** 50 agents in harbor (18), trailmap (14), ledgerly (14) and 4 projectless Grok bots; 6 live conversations, 3 ended. */
+/** 50 agents in harbor (18), trailmap (14), ledgerly (14) and 4 projectless Grok bots; 6 live conversations, 1 invitation, 3 ended. */
 export function big(): Record<string, unknown> {
   const specs: AgentSpec[] = [];
   const add = (app: AgentSpec['app'], project: string | null, names: string[], acts: Activity[]) => names.forEach((n, i) => specs.push({ app, name: n, project, activity: acts[i] ?? 'live' }));
@@ -84,6 +84,7 @@ export function big(): Record<string, unknown> {
       conv('01JC4', 'claude:harbor-2', 'grok:researcher', 'competitor pricing pages', 5, 30, 4, [ap('start', 'prompt', 'claude:harbor-2', 43), ap('accept', 'bot', 'grok:researcher', 43)]),
       conv('01JC5', 'codex:harbor feat/billing', 'grok:reviewer', 'review billing migration', 2, 10, 6, [ap('start', 'prompt', 'codex:harbor feat/billing', 11), ap('accept', 'bot', 'grok:reviewer', 11)]),
       conv('01JC6', 'claude:harbor', 'codex:ledgerly', 'shared auth client API', 3, 12, 9, [ap('start', 'prompt', 'claude:harbor', 26), ap('accept', 'cli', 'codex:ledgerly', 25), ap('extend', 'prompt', 'claude:harbor', 12, { turn_limit: 12 })]),
+      { ...conv('01JCONVPEND', 'grok:scout', 'codex:trailmap', 'app-store keyword trends', 0, 4, 1, []), state: 'pending' },
       conv('01JE1', 'claude:ledgerly', 'grok:researcher', 'FX rate sources', 8, 8, 29, [ap('start', 'prompt', 'claude:ledgerly', 60), ap('accept', 'bot', 'grok:researcher', 60)], { reason: 'turn_limit', min: 29 }),
       conv('01JE2', 'codex:trailmap-2', 'claude:trailmap', 'GPS fixture format', 2, 2, 136, [ap('start', 'prompt', 'codex:trailmap-2', 160), ap('accept', 'prompt', 'claude:trailmap', 159)], { reason: 'turn_limit', min: 136 }),
       conv('01JE3', 'claude:harbor-3', 'grok:reviewer', 'onboarding copy', 4, 20, 161, [], { reason: 'ended_by_participant', min: 161 }),

@@ -43,8 +43,8 @@ Package exports carry the repo-wide `agentbridge-source` condition, which points
 `native/build.sh` builds `bin/AgentBridge.app`, a background app bundle (dev and tests use this
 ad-hoc signed build; releases ship the Developer ID-signed copy in `signed/`, see below):
 
-- `Contents/MacOS/AgentBridge`: `native/main.swift`, `PanelModel.swift` and `PanelApp.swift` as one universal (arm64 +
-  x86_64) binary
+- `Contents/MacOS/AgentBridge`: `native/main.swift`, `PanelModel.swift`, `GraphModel.swift`, `PanelApp.swift` and
+  `GraphWindow.swift` as one universal (arm64 + x86_64) binary
 - `Contents/Info.plist`: copied from `native/Info.plist`. Bundle id `live.musi.agentbridge`, name
   "AgentBridge", `LSUIElement` (no Dock icon, no menu bar). It is a fixed file with no version
   stamped in, so the build's bytes only change when the code, plist or icon does.
@@ -89,14 +89,26 @@ cannot be used to read other apps' items.
 | `version` | — | `version`, `protocol` |
 
 **`panel` is the exception: long-running, argv options, no stdin request.** It is the agent panel's menu-bar dropdown
-(`native/PanelApp.swift`, view model in `native/PanelModel.swift`) and the only path that starts AppKit; main.swift
-hands `panel` off before the one-request guard, so the subcommands above behave exactly as before.
+(`native/PanelApp.swift`, view model in `native/PanelModel.swift`) and its graph window (`native/GraphWindow.swift`,
+layout in `native/GraphModel.swift`), and the only path that starts AppKit; main.swift hands `panel` off before the
+one-request guard, so the subcommands above behave exactly as before. The window opens from the dropdown's Window
+button (⌘O): groups as donut chips (state ring, name, each app's installed icon with its count) with merged lines (By project | By app), an arc list (List), and a
+conversation's approvals and turns as a sequence when you click a line. The bubbles zoom and pan (pinch or ⌘-scroll,
+scroll or drag the empty canvas, ⌘+ ⌘− ⌘0, controls bottom right): below 60% groups shrink to dots, at 100% lines show
+who started them, turns, age and "waiting on you", from 150% groups open into agent cards with lines card to card.
+Drag a group chip to move it; its spot is saved per grouping (`agentPanel.chipPositions`), and View → Reset Layout
+(or ↺ by the zoom controls) puts the chips back.
+Read-only, like the dropdown; the app shows in the Dock and ⌘-Tab only while the window is open.
 
 ```
 AgentBridge panel [--home <dir>] -- <node> [node args…] <cli entry>   # the menu-bar app (what PanelAgent's plist runs)
 AgentBridge panel --print-model [--now <iso>] [--filter <text>]      # no UI: status snapshot on stdin → view model JSON
 AgentBridge panel --snapshot-file <file.json>                        # the menu-bar app showing one saved snapshot
 AgentBridge panel --render-png <out.png> --snapshot-file <f> [--tab agents] [--dark]   # draw it off-screen (screenshots)
+AgentBridge panel --print-model --graph [--group-by project|app] [--expand <id,…>|none] [--show-all <id,…>]
+                  [--layout auto|bubbles|list] [--filter <text>] [--positions <json>]  # no UI: the window's layout JSON
+AgentBridge panel --render-png <out.png> --snapshot-file <f> --window [same options] [--select edge:<id>|conv:<id>|node:<id>]
+                  [--size 1060x640] [--dark] [--zoom 0.5|1.8]                        # draw the window off-screen
 ```
 
 The app runs `<node> <cli> status --watch --json` as a child and decodes one line per change

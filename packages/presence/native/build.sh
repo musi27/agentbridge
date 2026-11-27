@@ -23,7 +23,7 @@ done
 app="$out/AgentBridge.app"
 exe="$app/Contents/MacOS/AgentBridge"
 # Keep in sync with SOURCE_FILES in scripts/signed-helper.ts (the signed bundle's manifest covers the same files).
-swift_files="$here/main.swift $here/PanelModel.swift $here/PanelApp.swift"
+swift_files="$here/main.swift $here/PanelModel.swift $here/GraphModel.swift $here/PanelApp.swift $here/GraphWindow.swift"
 fresh() {
   [ -n "$if_missing" ] && [ -x "$exe" ] || return 1
   for f in $swift_files "$here/Info.plist" "$here/AppIcon.icns"; do [ "$exe" -nt "$f" ] || return 1; done

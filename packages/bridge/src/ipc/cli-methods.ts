@@ -29,6 +29,8 @@ export interface CliContext {
 export const WATCH_NOTICES = 5;
 /** How many conversations that ended today (bridge local time) `status --watch` adds, most recently ended first. */
 export const WATCH_ENDED_TODAY = 20;
+/** Turns per conversation in `status --json`'s turn_log (who and when, no text): the graph window's sequence view. */
+export const WATCH_TURN_LOG = 50;
 
 type Out = { result?: unknown; error?: IpcError };
 const ok = (result: unknown): Out => ({ result });
@@ -131,11 +133,17 @@ export async function handleCli(ctx: CliContext, method: CliMethod, raw: unknown
           const list = approvals.get(e.conversation_id!) ?? []; approvals.set(e.conversation_id!, list);
           list.push({ kind: d.kind, via: d.via, agent: e.participant_id ? addr(e.participant_id) : '?', at: new Date(e.ts).toISOString(), ...(d.turn_limit !== undefined ? { turn_limit: d.turn_limit } : {}) });
         }
+        const turnLogs = new Map<string, Array<{ turn: number; from: string; at: string }>>();
+        for (const t of store.turnLog(listed.map((c) => c.id), WATCH_TURN_LOG)) {
+          const list = turnLogs.get(t.conversation_id) ?? []; turnLogs.set(t.conversation_id, list);
+          list.push({ turn: t.turn, from: addr(t.from_id), at: new Date(t.created_at).toISOString() });
+        }
         return {
           conversation_list: listed.map((c) => ({
             id: c.id, initiator: addr(c.initiator_id), invitee: addr(c.invitee_id), topic: c.topic, state: c.state,
             turn_count: c.turn_count, turn_limit: c.turn_limit, origin: c.origin, queued: !!c.queued, updated_at: new Date(c.updated_at).toISOString(),
             created_at: new Date(c.created_at).toISOString(), ended_at: iso(c.ended_at), end_reason: c.end_reason, approvals: approvals.get(c.id) ?? [],
+            turn_log: turnLogs.get(c.id) ?? [],
           })),
           waiting_deliveries: waitingDeliveries(store.pendingDeliveries(), addr),
           recent_notices: store.recentPopups(WATCH_NOTICES).map(notice),

@@ -8,8 +8,10 @@
 //
 // Usage:
 //   AgentBridge panel [--home <dir>] -- <node> [node args…] <cli entry>   menu-bar app (what the LaunchAgent runs)
-//   AgentBridge panel --snapshot-file <path>                             menu-bar app showing one saved snapshot (design checks)
+//   AgentBridge panel --snapshot-file <path> [--open-window]             menu-bar app showing one saved snapshot (design checks)
 //   AgentBridge panel --print-model [--now <iso>] [--filter <text>]      no UI: snapshot on stdin → view model JSON on stdout
+//   AgentBridge panel --print-model --graph [graph options]              no UI: the graph window's layout as JSON
+//   AgentBridge panel --render-png <out.png> --snapshot-file <f> [--window …]   draw the dropdown or the window off-screen
 import AppKit
 import Combine
 import Foundation
@@ -21,6 +23,8 @@ struct PanelConfig {
   var command: [String] = []      // node, node args, cli entry
   var home: String?
   var snapshotFile: String?
+  /// Open the graph window at launch (design checks and UI tests).
+  var openWindow = false
   var homeArgs: [String] { home.map { ["--home", $0] } ?? [] }
 }
 
@@ -32,6 +36,7 @@ func parsePanelArgs(_ args: [String]) -> PanelConfig {
     if a == "--" { c.command = Array(args[(i + 1)...]); break }
     if a == "--home", i + 1 < args.count { c.home = args[i + 1]; i += 2; continue }
     if a == "--snapshot-file", i + 1 < args.count { c.snapshotFile = args[i + 1]; i += 2; continue }
+    if a == "--open-window" { c.openWindow = true; i += 1; continue }
     FileHandle.standardError.write(Data("AgentBridge panel: unknown option \(a)\n".utf8)); exit(2)
   }
   return c
@@ -214,6 +219,7 @@ struct PanelView: View {
   @ObservedObject var store: PanelStore
   var onTurnOff: () -> Void
   var onQuit: () -> Void
+  var onOpenWindow: () -> Void = {}
   @AppStorage("agentPanel.groupBy") private var groupBy = "project"   // shared with the window (step B)
   @AppStorage("agentPanel.tab") private var tab = "conversations"
   @State private var query = ""
@@ -354,10 +360,10 @@ struct PanelView: View {
   private var footer: some View {
     HStack(spacing: 8) {
       Spacer()
-      Button("Window · soon") {}.disabled(true).controlSize(.small)
-        .help("The agent graph window comes in a later release")
+      Button("Window", action: onOpenWindow).controlSize(.small).keyboardShortcut("o")
+        .help("Open the agent graph window (⌘O)")
       Menu {
-        Button("Open window (soon)") {}.disabled(true)
+        Button("Open window", action: onOpenWindow)
         Divider()
         Button("Turn off menu-bar panel…", action: onTurnOff)
         Button("Quit until next login", action: onQuit)
@@ -414,7 +420,9 @@ struct NeedsYouSection: View {
         VStack(alignment: .leading, spacing: 1) {
           HStack(spacing: 7) {
             Diamond(color: .abNeed)
-            (Text(r.verb + " ") + Text(r.target).fontWeight(.semibold) + Text(r.meta.isEmpty ? "" : " · \(r.meta)"))
+            Text(r.verb).lineLimit(1).fixedSize()
+            AppIconView(app: r.app, size: 15)
+            (Text(bareName(r.target)).fontWeight(.semibold) + Text(r.meta.isEmpty ? "" : " · \(r.meta)"))
               .lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 4)
             CopyButton(value: r.copy, label: r.copyLabel)
@@ -445,9 +453,32 @@ struct ConversationRowView: View {
         }
         Text(row.turns).font(.system(size: 11, design: .monospaced)).foregroundColor(.secondary)
       }
-      Text(row.pair).font(.system(size: 11.5)).foregroundColor(.secondary).lineLimit(1).truncationMode(.middle).padding(.leading, 12)
+      PairView(from: row.from, to: row.to).padding(.leading, 12)
     }
     .help(row.approvals.joined(separator: "\n"))
+  }
+}
+
+/// Next to an app icon the "codex:" / "grok:" prefix says the same thing twice: "codex:trailmap" → "trailmap".
+func bareName(_ address: String) -> String {
+  guard let i = address.firstIndex(of: ":"), address[..<i].allSatisfy({ $0.isLetter }) else { return address }
+  return String(address[address.index(after: i)...])
+}
+
+/// "[icon] harbor feat/billing ↔ [icon] researcher": each agent with its app's icon (the installed app's, or the
+/// letter badge), names truncating in the middle.
+struct PairView: View {
+  let from: String; let to: String
+  var body: some View {
+    HStack(spacing: 4) {
+      AppIconView(app: appOf(from), size: 13)
+      Text(bareName(from)).lineLimit(1).truncationMode(.middle)
+      Text("↔").layoutPriority(1)
+      AppIconView(app: appOf(to), size: 13)
+      Text(bareName(to)).lineLimit(1).truncationMode(.middle)
+    }
+    .font(.system(size: 11.5)).foregroundColor(.secondary)
+    .accessibilityElement(children: .combine).accessibilityLabel("\(displayName(from)) and \(displayName(to))")
   }
 }
 
@@ -456,12 +487,19 @@ struct EndedRowView: View {
   var body: some View {
     HStack(spacing: 6) {
       Circle().strokeBorder(Color.secondary, lineWidth: 1.2).frame(width: 6, height: 6)
-      Text("\(row.topic) · \(row.pair)").lineLimit(1).truncationMode(.tail)
+      Text(row.topic.isEmpty ? row.pair : row.topic).lineLimit(1).truncationMode(.tail)
+      // who, as two app icons; the names are in the tooltip (the row has no room for them)
+      HStack(spacing: 2) {
+        AppIconView(app: appOf(row.from), size: 13)
+        Text("↔").font(.system(size: 10))
+        AppIconView(app: appOf(row.to), size: 13)
+      }
+      .fixedSize()
       Spacer(minLength: 4)
       Text(row.ended ?? "").font(.system(size: 11))
     }
     .foregroundColor(.secondary).font(.system(size: 11.5))
-    .help(row.approvals.joined(separator: "\n"))
+    .help(([row.pair] + row.approvals).joined(separator: "\n"))
   }
 }
 
@@ -587,20 +625,34 @@ final class PanelAppDelegate: NSObject, NSApplicationDelegate {
   var item: NSStatusItem!
   let popover = NSPopover()
   var sub: AnyCancellable?
+  lazy var graphWindow = GraphWindowController(store: store)
 
   init(store: PanelStore) { self.store = store }
+
+  func openWindow() {
+    popover.performClose(nil)
+    graphWindow.show()
+  }
+
+  /// A click on the Dock icon (only there while the window is open) brings the window back.
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    if !flag { graphWindow.show() }
+    return true
+  }
 
   func applicationDidFinishLaunching(_ n: Notification) {
     item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     item.button?.target = self
     item.button?.action = #selector(toggle)
     item.button?.setAccessibilityLabel("AgentBridge")
-    let host = NSHostingController(rootView: PanelView(store: store, onTurnOff: { [weak self] in self?.confirmTurnOff() }, onQuit: { NSApp.terminate(nil) }))
+    let host = NSHostingController(rootView: PanelView(store: store, onTurnOff: { [weak self] in self?.confirmTurnOff() }, onQuit: { NSApp.terminate(nil) },
+                                                       onOpenWindow: { [weak self] in self?.openWindow() }))
     host.sizingOptions = .preferredContentSize
     popover.contentViewController = host
     popover.behavior = .transient
     sub = store.$model.receive(on: RunLoop.main).sink { [weak self] m in self?.updateIcon(m) }
     store.start()
+    if store.config.openWindow { DispatchQueue.main.async { self.openWindow() } }
   }
 
   func applicationWillTerminate(_ n: Notification) { store.stop() }
@@ -649,8 +701,11 @@ func singleInstance() -> Bool {
 
 /// `panel --render-png <out.png> --snapshot-file <f> [--tab agents|conversations] [--dark]`: draws the dropdown off-screen
 /// into a PNG (design checks and PR screenshots; needs no Screen Recording permission). Never shown, no status item.
+/// `--window [graph options] [--select edge:<id>|conv:<id>|node:<id>] [--size <w>x<h>] [--appearance light|dark]` draws the
+/// graph window instead
+/// (graph options as for `--print-model --graph`; nothing is written to the app's preferences).
 func renderPNG(_ args: [String]) -> Never {
-  var out = "", file = "", tab = "conversations", dark = false
+  var out = "", file = "", tab = "conversations", dark = false, window = false, select = "", size = NSSize(width: 1060, height: 640)
   var i = 0
   while i < args.count {
     switch args[i] {
@@ -658,6 +713,12 @@ func renderPNG(_ args: [String]) -> Never {
     case "--snapshot-file": file = i + 1 < args.count ? args[i + 1] : ""; i += 1
     case "--tab": tab = i + 1 < args.count ? args[i + 1] : tab; i += 1
     case "--dark": dark = true
+    case "--window": window = true
+    case "--select": select = i + 1 < args.count ? args[i + 1] : ""; i += 1
+    case "--size":
+      let wh = (i + 1 < args.count ? args[i + 1] : "").split(separator: "x").compactMap { Double($0) }
+      if wh.count == 2 { size = NSSize(width: wh[0], height: wh[1]) }
+      i += 1
     default: break
     }
     i += 1
@@ -665,11 +726,33 @@ func renderPNG(_ args: [String]) -> Never {
   let app = NSApplication.shared
   app.setActivationPolicy(.prohibited)
   if dark { app.appearance = NSAppearance(named: .darkAqua) }
-  UserDefaults.standard.set(tab, forKey: "agentPanel.tab")
   let store = PanelStore(config: PanelConfig(snapshotFile: file))
   store.start()
-  let view = NSHostingView(rootView: PanelView(store: store, onTurnOff: {}, onQuit: {}).background(Color(nsColor: .windowBackgroundColor)))
-  let size = view.fittingSize
+  let view: NSView
+  if window {
+    let o = parseGraphOptions(args)
+    // a throwaway, never-saved defaults domain: the render must not change the person's window settings
+    let defaults = UserDefaults(suiteName: "live.musi.agentbridge.render") ?? .standard
+    let look = args.firstIndex(of: "--appearance").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? "system"
+    defaults.register(defaults: ["agentPanel.groupBy": o.groupBy, "agentPanel.windowLayout": o.layout == "list" ? "list" : "bubbles", "agentPanel.windowAppearance": look])
+    let parts = select.split(separator: ":", maxSplits: 1).map(String.init)
+    let sel: GraphSelection
+    switch parts.first ?? "" {
+    case "edge" where parts.count == 2: sel = .edge(parts[1])
+    case "conv" where parts.count == 2: sel = .conversation(parts[1], from: nil)
+    case "node" where parts.count == 2: sel = .node(parts[1])
+    default: sel = .none
+    }
+    let ui = GraphUI()
+    // --zoom 0.5 | 1.8: the bubbles at that zoom (1 = fit), to check the dots and cards levels off-screen
+    if let z = args.firstIndex(of: "--zoom").flatMap({ $0 + 1 < args.count ? Double(args[$0 + 1]) : nil }) { ui.zoom = z }
+    view = NSHostingView(rootView: GraphWindowView(store: store, ui: ui, defaults: defaults, options: o, selection: sel)
+      .frame(width: size.width, height: size.height).background(Color(nsColor: .windowBackgroundColor)))
+  } else {
+    UserDefaults.standard.set(tab, forKey: "agentPanel.tab")
+    view = NSHostingView(rootView: PanelView(store: store, onTurnOff: {}, onQuit: {}).background(Color(nsColor: .windowBackgroundColor)))
+    size = view.fittingSize
+  }
   let win = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: .borderless, backing: .buffered, defer: false)
   win.contentView = view
   view.frame = NSRect(origin: .zero, size: size)

@@ -44,6 +44,8 @@ export interface StatusConversation {
   origin: string | null; queued: boolean;
   started_at: string | null; ended_at: string | null; last_activity_at: string;
   approvals: Array<{ kind: string; via: string; agent: string; at: string; turn_limit?: number }>;
+  /** The last turns (at most 50), oldest first: who took each and when. Never message text. Empty from older bridges. */
+  turn_log: Array<{ turn: number; from: string; at: string }>;
 }
 export interface StatusNotice { at: string; title: string; body: string }
 export interface StatusWarning { code: string; text: string; agents?: string[] }
@@ -120,6 +122,7 @@ export function buildStatusJson(s: WatchStatus, o: { cliVersion: string; nowMs: 
     turns: { used: c.turn_count, limit: c.turn_limit }, origin: c.origin ? plainText(c.origin) : null, queued: !!c.queued,
     started_at: c.created_at ?? null, ended_at: c.ended_at ?? null, last_activity_at: c.updated_at,
     approvals: (c.approvals ?? []).map((a) => ({ kind: plainText(a.kind), via: plainText(a.via), agent: plainText(a.agent), at: a.at, ...(a.turn_limit !== undefined ? { turn_limit: a.turn_limit } : {}) })),
+    turn_log: (c.turn_log ?? []).map((t) => ({ turn: t.turn, from: plainText(t.from), at: t.at })),
   })).sort((x, y) => cmp(y.last_activity_at, x.last_activity_at) || cmp(x.id, y.id));
 
   const agentOf = (address: string, base: { kind: string; title: string; state: string; activity: StatusAgent['activity']; shortId: string; folder: string }): StatusAgent => {

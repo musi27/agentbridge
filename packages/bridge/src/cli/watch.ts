@@ -7,6 +7,8 @@ export const WATCH_INTERVAL_MS = 1500;
 export interface WatchOutput {
   isTTY: boolean;
   columns?: number;
+  /** Terminal height (TTY only). The frame is fitted to it, so a panel taller than the terminal never scrolls. */
+  rows?: number;
   write(s: string): void;
   /** Called on terminal resize (TTY only). */
   onResize?(fn: () => void): void;
@@ -37,7 +39,9 @@ async function frame(d: WatchDeps, tty: boolean): Promise<string[]> {
   const now = d.now?.() ?? Date.now();
   try {
     const s = await d.fetch();
-    return renderPanel(buildPanel(s, { cliVersion: d.cliVersion, nowMs: now }), { width: d.out.columns ?? 100, color: tty && d.color !== false, clock: clockOf(now) });
+    // the footer adds 2 lines and the redraw ends with a newline: leave 3 rows so the frame never scrolls
+    const height = tty && d.out.rows ? d.out.rows - 3 : undefined;
+    return renderPanel(buildPanel(s, { cliVersion: d.cliVersion, nowMs: now }), { width: d.out.columns ?? 100, color: tty && d.color !== false, clock: clockOf(now), ...(height !== undefined ? { height } : {}) });
   } catch (e) {
     return [`agentbridge   ${clockOf(now)}`, '', `cannot read the bridge: ${(e as Error).message}`, tty ? 'retrying…' : ''];
   }

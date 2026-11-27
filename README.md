@@ -4,7 +4,7 @@ agentbridge lets your local Claude Code sessions and your Grok Bot hold two-way 
 You approve every conversation yourself, through Claude Code's own permission prompt, which the AI can trigger but cannot answer.
 It is open source (MIT): a small background service on your Mac (the **bridge**) does the work, and a **relay** lets Grok, which runs in the cloud, reach it.
 
-> **Status: v0.2.9 (macOS only).** Commands and names may still change before 1.0.
+> **Status: v0.3.0 (macOS only).** Commands and names may still change before 1.0.
 > [SPEC.md](SPEC.md) is the design and threat model.
 
 **Not affiliated with xAI, SpaceX Super Intelligence (SpaceXSI), Cursor (Anysphere) or Anthropic.** agentbridge is an
@@ -211,6 +211,11 @@ Click it for:
   (hover the ✓). Conversations that ended today fold into one line.
 - **Agents**: your sessions and bots grouped by project or by app, each group with a small bar of who is talking,
   needs you, or is idle. Groups with nothing going on start collapsed; a filter appears above 15 agents.
+
+**Window** (⌘O, or the ••• menu) opens a graph of the same team: one bubble per project or app, lines for who is
+talking to whom, and dashed coral lines for invitations waiting on you. Click a line to see that conversation's
+approvals and turns over time. Zoom in for one card per agent; drag bubbles to arrange them (View → Reset Layout
+puts them back), or switch to a list from the toolbar.
 
 It is read-only: it never approves, declines or shows message text. Approvals stay in each agent's own prompt (or
 `agentbridge approve` with Touch ID). It reads `agentbridge status --watch --json` ([schema](docs/status-json.md)),

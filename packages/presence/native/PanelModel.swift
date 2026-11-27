@@ -27,6 +27,7 @@ struct Snapshot: Decodable {
     // approval
     let approval_id: String?; let kind: String?; let from: String?; let to: String?; let topic: String?
     let turn_limit: Int?; let expires_at: String?; let answer_in: String?; let answer_with: String?
+    let conversation_id: String?
     // held_messages
     let agent: String?; let hold: String?; let count: Int?; let text: String?
   }
@@ -39,7 +40,10 @@ struct Snapshot: Decodable {
     struct Turns: Decodable { let used: Int?; let limit: Int? }
     struct Approval: Decodable { let kind: String?; let via: String?; let agent: String?; let at: String?; let turn_limit: Int? }
     let id: String; let from: String; let to: String; let topic: String?; let state: String?; let end_reason: String?
-    let turns: Turns?; let queued: Bool?; let ended_at: String?; let last_activity_at: String?; let approvals: [Approval]?
+    /// One entry per turn, no text (optional: a bridge that doesn't send it gets the aggregated sequence view).
+    struct TurnEntry: Decodable { let turn: Int?; let from: String?; let at: String? }
+    let turns: Turns?; let queued: Bool?; let started_at: String?; let ended_at: String?; let last_activity_at: String?
+    let approvals: [Approval]?; let turn_log: [TurnEntry]?
   }
   let schema: Int?; let generated_at: String?
   let bridge: Bridge?; let warnings: [Warning]?; let needs_you: [Need]?
@@ -59,7 +63,7 @@ struct AgentRow: Encodable, Identifiable {
   let title: String?
   let project: String?
   let state: AgentState
-  /// Short tag drawn at the end of the row ("talking", "invited", "1st prompt", "unreachable", "closed", …); nil for plain idle.
+  /// Short tag drawn at the end of the row ("talking", "invited", "more turns?", "1st prompt", "unreachable", "closed", …); nil for plain idle.
   let tag: String?
 }
 
@@ -86,6 +90,7 @@ struct NeedRow: Encodable, Identifiable {
   let kind: String          // "approval" | "held"
   let verb: String          // "Answer in" | "Type in" | "Run agentbridge approve for"
   let target: String        // display name of the agent to act in
+  let app: String           // that agent's app ("claude", "codex", …): its icon goes before the name
   let meta: String          // "7 min" | "1 held" | "waiting for the session"
   /// The short grey second line: what it's about (“topic” · from whom | more turns | why messages wait).
   let context: String
@@ -93,7 +98,7 @@ struct NeedRow: Encodable, Identifiable {
   let copyLabel: String     // accessibility label: "Copy address …" | "Copy command …"
   let copy: String          // what the copy button puts on the clipboard
   let expiresAt: String?
-  enum CodingKeys: String, CodingKey { case id, kind, verb, target, meta, context, detail, copyLabel = "copy_label", copy, expiresAt = "expires_at" }
+  enum CodingKeys: String, CodingKey { case id, kind, verb, target, app, meta, context, detail, copyLabel = "copy_label", copy, expiresAt = "expires_at" }
 }
 
 let holdReasons: [String: String] = [
@@ -115,6 +120,29 @@ struct ConversationRow: Encodable, Identifiable {
   /// One line per approval ("Started: you, in harbor's prompt · 14:07"); the mark's tooltip.
   let approvals: [String]
   let ended: String?        // "13:52 · turn limit"
+  // for the graph window (step B): who, and the B3 sequence (approvals and turns over time, never message text)
+  let from: String
+  let to: String
+  let lastActivityAt: String?
+  let sequence: [SeqEvent]
+  /// A "more turns" approval for this conversation waits on you.
+  var waiting = false
+  /// Since the last activity: "now", "4m", "2h", "3d".
+  var age: String? = nil
+  /// Turns taken in the last 10 minutes (from the turn log; 0 without one): how busy its line is drawn.
+  var recentTurns = 0
+  enum CodingKeys: String, CodingKey { case id, topic, pair, live, pending, turns, mark, approvals, ended, from, to, lastActivityAt = "last_activity_at", sequence, waiting, age, recentTurns = "recent_turns" }
+}
+
+/// One row of the B3 sequence view. `side`: "from" (initiator's column) → arrow to the right, "to" → arrow to the left,
+/// "both" for a row across both columns (an aggregate of turns, the end).
+struct SeqEvent: Encodable, Equatable {
+  let kind: String          // "approval" | "turn" | "turns" | "end"
+  let side: String          // "from" | "to" | "both"
+  let label: String
+  let time: String?         // "HH:mm"
+  /// An approval a human gave (prompt or CLI): drawn with ✓ in the talking colour.
+  let human: Bool
 }
 
 /// "claude:harbor" → "harbor": Claude Code is the common case, every other app keeps its prefix.
@@ -177,6 +205,14 @@ struct Clock {
     let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = timeZone; f.dateFormat = "HH:mm"
     return f.string(from: d)
   }
+  /// "now" / "4m" / "2h" / "3d": time since something happened.
+  func ago(_ s: String?) -> String? {
+    guard let d = Clock.parse(s) else { return nil }
+    let mins = Int(now.timeIntervalSince(d) / 60)
+    if mins < 1 { return "now" }
+    if mins < 60 { return "\(mins)m" }
+    return mins < 60 * 24 ? "\(mins / 60)h" : "\(mins / 60 / 24)d"
+  }
   /// "7 min" / "1 h 5 min" / "expired": time left on an approval.
   func expiry(_ s: String?) -> String? {
     guard let d = Clock.parse(s) else { return nil }
@@ -186,10 +222,12 @@ struct Clock {
   }
 }
 
-func agentState(_ a: Snapshot.Agent, held: Set<String>) -> (AgentState, String?) {
+/// `moreTurns`: agents whose only waiting approvals are "more turns" (extend) requests. The status JSON's
+/// `approval` activity covers invites and extends alike; the needs list says which.
+func agentState(_ a: Snapshot.Agent, held: Set<String>, moreTurns: Set<String> = []) -> (AgentState, String?) {
   let activity = a.activity ?? a.state ?? "live"
   switch activity {
-  case "approval": return (.needsYou, "invited")
+  case "approval": return (.needsYou, moreTurns.contains(a.address) ? "more turns?" : "invited")
   case "in_conversation": return (.talking, "talking")
   case "working": return (.working, "working")
   case "waiting_first_prompt": return (held.contains(a.address) ? .needsYou : .idle, "1st prompt")
@@ -218,6 +256,11 @@ func makeGroup(id: String, label: String, rows: [(Int, AgentRow)]) -> AgentGroup
 func turnsText(_ t: Snapshot.Conversation.Turns?) -> String { "\(t?.used ?? 0)/\(t?.limit.map(String.init) ?? "?")" }
 
 func approvalLine(_ a: Snapshot.Conversation.Approval, clock: Clock) -> String {
+  [approvalText(a), clock.hm(a.at)].compactMap { $0 }.joined(separator: " · ")
+}
+
+/// "Started: you, in harbor's prompt" (no time).
+func approvalText(_ a: Snapshot.Conversation.Approval) -> String {
   let kind: String
   switch a.kind ?? "" {
   case "start": kind = "Started"
@@ -234,7 +277,7 @@ func approvalLine(_ a: Snapshot.Conversation.Approval, clock: Clock) -> String {
   case "bot": how = "\(agent) by itself"
   default: how = "\(a.via ?? "?") (\(agent))"
   }
-  return [kind + ": " + how, clock.hm(a.at)].compactMap { $0 }.joined(separator: " · ")
+  return kind + ": " + how
 }
 
 /// "✓" when a human approved (prompt or CLI), "rule" when only an allow rule (or a bot) did, "" with no record.
@@ -262,6 +305,9 @@ func buildModel(_ s: Snapshot, clock: Clock) -> PanelModel {
   }
   let needs = s.needs_you ?? []
   let held = Set(needs.filter { $0.type == "held_messages" }.compactMap { $0.agent })
+  // who is asked to approve (answer_in, else the invitee): an agent asked only for more turns is not "invited"
+  let approvalsFor = { (extend: Bool) in Set(needs.filter { $0.type == "approval" && ($0.kind == "extend") == extend }.compactMap { $0.answer_in ?? $0.to }) }
+  let moreTurns = approvalsFor(true).subtracting(approvalsFor(false))
 
   var needRows: [NeedRow] = []
   for (i, n) in needs.enumerated() {
@@ -287,14 +333,14 @@ func buildModel(_ s: Snapshot, clock: Clock) -> PanelModel {
       }
       let id = n.approval_id ?? "approval-\(i)"
       needRows.append(NeedRow(
-        id: id, kind: "approval", verb: cli ? "Run agentbridge approve for" : "Answer in", target: displayName(target),
+        id: id, kind: "approval", verb: cli ? "Run agentbridge approve for" : "Answer in", target: displayName(target), app: appOf(target),
         meta: clock.expiry(n.expires_at) ?? (n.kind == "accept" ? "waiting for the session" : ""), context: context, detail: detail,
         copyLabel: cli ? "Copy command agentbridge approve \(id)" : "Copy address \(target)",
         copy: cli ? "agentbridge approve \(id)" : target, expiresAt: n.expires_at))
     } else if n.type == "held_messages" {
       let agent = n.agent ?? "?"; let c = n.count ?? 0
       needRows.append(NeedRow(
-        id: "held-\(agent)-\(n.hold ?? "")", kind: "held", verb: "Type in", target: displayName(agent), meta: "\(c) held",
+        id: "held-\(agent)-\(n.hold ?? "")", kind: "held", verb: "Type in", target: displayName(agent), app: appOf(agent), meta: "\(c) held",
         context: "\(c) message\(c == 1 ? "" : "s") " + (holdReasons[n.hold ?? ""] ?? "waiting"),
         detail: n.text ?? n.hold ?? "", copyLabel: "Copy address \(agent)", copy: agent, expiresAt: nil))
     }
@@ -305,7 +351,7 @@ func buildModel(_ s: Snapshot, clock: Clock) -> PanelModel {
   var rows: [(Int, AgentRow)] = []
   for (i, a) in agents.enumerated() {
     let app = a.app ?? appOf(a.address)
-    let (st, tag) = agentState(a, held: held)
+    let (st, tag) = agentState(a, held: held, moreTurns: moreTurns)
     let name = a.address.hasPrefix(app + ":") ? String(a.address.dropFirst(app.count + 1)) : (a.name ?? a.address)
     rows.append((i, AgentRow(address: a.address, app: app, badge: appBadge(app), name: name, title: a.title, project: a.project?.label, state: st, tag: tag)))
   }
@@ -330,6 +376,7 @@ func buildModel(_ s: Snapshot, clock: Clock) -> PanelModel {
 
   // conversations
   var live: [ConversationRow] = []; var ended: [ConversationRow] = []
+  let waitingConvs = Set(needs.filter { $0.type == "approval" && $0.kind == "extend" }.compactMap { $0.conversation_id })
   for c in s.conversations ?? [] {
     var lines = (c.approvals ?? []).map { approvalLine($0, clock: clock) }
     let isLive = c.state != "ended"
@@ -338,8 +385,12 @@ func buildModel(_ s: Snapshot, clock: Clock) -> PanelModel {
       lines = [pending ? (c.queued == true ? "Invitation waits for \(displayName(c.to)) to open" : "Invitation not accepted yet") : "No approval record (older conversation)"]
     }
     let endedText = isLive ? nil : [clock.hm(c.ended_at ?? c.last_activity_at), c.end_reason.map { endReasons[$0] ?? $0 }].compactMap { $0 }.joined(separator: " · ")
-    let row = ConversationRow(id: c.id, topic: c.topic ?? "", pair: "\(displayName(c.from)) ↔ \(displayName(c.to))", live: isLive, pending: pending,
-                              turns: turnsText(c.turns), mark: approvalMark(c.approvals ?? []), approvals: lines, ended: endedText)
+    var row = ConversationRow(id: c.id, topic: c.topic ?? "", pair: "\(displayName(c.from)) ↔ \(displayName(c.to))", live: isLive, pending: pending,
+                              turns: turnsText(c.turns), mark: approvalMark(c.approvals ?? []), approvals: lines, ended: endedText,
+                              from: c.from, to: c.to, lastActivityAt: c.last_activity_at, sequence: sequenceEvents(c, clock: clock))
+    row.waiting = isLive && !pending && waitingConvs.contains(c.id)
+    row.age = clock.ago(c.last_activity_at ?? c.started_at)
+    row.recentTurns = (c.turn_log ?? []).filter { Clock.parse($0.at).map { clock.now.timeIntervalSince($0) <= 600 } ?? false }.count
     if isLive { live.append(row) } else { ended.append(row) }
   }
 
@@ -400,15 +451,39 @@ func decodeLine(_ data: Data, clock: (String?) -> Clock) -> LineResult {
   } catch { return .bad("snapshot did not decode: \(error.localizedDescription)") }
 }
 
-// MARK: `AgentBridge panel --print-model [--now <iso>] [--filter <text>] < snapshot.json`
+// MARK: `AgentBridge panel --print-model [--now <iso>] [--filter <text>] [graph options] < snapshot.json`
+
+/// Graph options shared by `--print-model --graph` and `--render-png --window`:
+/// `--group-by project|app`, `--expand <group id>[,<group id>…]` (`--expand none` closes every group),
+/// `--show-all <group id>[,…]`, `--layout auto|bubbles|list`, `--filter <text>`.
+func parseGraphOptions(_ args: [String]) -> GraphOptions {
+  var o = GraphOptions()
+  var i = 0
+  func list(_ v: String) -> Set<String> { v == "none" ? [] : Set(v.split(separator: ",").map(String.init)) }
+  while i < args.count {
+    let v = i + 1 < args.count ? args[i + 1] : ""
+    switch args[i] {
+    case "--group-by": o.groupBy = v == "app" ? "app" : "project"; i += 1
+    case "--expand": o.expanded = list(v); i += 1
+    case "--show-all": o.showAll = list(v); i += 1
+    case "--layout": o.layout = ["bubbles", "list"].contains(v) ? v : "auto"; i += 1
+    case "--filter": o.query = v; i += 1
+    case "--positions": o.positions = (try? JSONDecoder().decode([String: [Double]].self, from: Data(v.utf8))) ?? [:]; i += 1
+    default: break
+    }
+    i += 1
+  }
+  return o
+}
 
 func printModel(_ args: [String]) -> Never {
-  var now: Date?; var filter: String?
+  var now: Date?; var filter: String?; var graph = false
   var i = 0
   while i < args.count {
     switch args[i] {
     case "--now": i += 1; now = i < args.count ? Clock.parse(args[i]) : nil
     case "--filter": i += 1; filter = i < args.count ? args[i] : nil
+    case "--graph": graph = true
     default: break
     }
     i += 1
@@ -430,8 +505,13 @@ func printModel(_ args: [String]) -> Never {
   guard var m = model else {
     FileHandle.standardError.write(Data("no snapshot on stdin\n".utf8)); exit(2)
   }
-  if let f = filter { m.byProject = filterGroups(m.byProject, f); m.byApp = filterGroups(m.byApp, f) }
   let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys, .prettyPrinted]
+  if graph {
+    FileHandle.standardOutput.write((try? enc.encode(buildGraph(m, parseGraphOptions(args)))) ?? Data("{}".utf8))
+    FileHandle.standardOutput.write(Data("\n".utf8))
+    exit(0)
+  }
+  if let f = filter { m.byProject = filterGroups(m.byProject, f); m.byApp = filterGroups(m.byApp, f) }
   FileHandle.standardOutput.write((try? enc.encode(m)) ?? Data("{}".utf8))
   FileHandle.standardOutput.write(Data("\n".utf8))
   exit(0)

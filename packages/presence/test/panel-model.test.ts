@@ -51,7 +51,7 @@ test('50 agents: needs-you lines, icon count, search, status line', async (t) =>
 test('50 agents: conversations are topic first, with who approved, how and when', async (t) => {
   if (skip) return t.skip(skip);
   const m = await model(big());
-  assert.equal(m.live.length, 6);
+  assert.equal(m.live.length, 7);            // 6 active + grok:scout's pending invitation
   assert.equal(m.ended.length, 3);
   const vat = m.live.find((c) => c.topic === 'EU VAT rules for invoices')!;
   assert.deepEqual([vat.pair, vat.turns, vat.mark], ['harbor feat/billing ↔ grok:researcher', '12/30', '✓']);
@@ -130,4 +130,23 @@ test('panel options never reach the one-request subcommands: version and the arg
   assert.match(extra.stdout, /usage: AgentBridge <subcommand>/);
   const noInput = await run(helper, ['panel', '--print-model'], { input: '', timeoutMs: 10_000 });
   assert.equal(noInput.code, 2);
+});
+
+test('an agent asked only for more turns is tagged "more turns?", not "invited"', async (t) => {
+  if (skip) return t.skip(skip);
+  type Snap = { needs_you: Array<Record<string, unknown>>; agents: Array<Record<string, unknown>> };
+  const tagOf = (m: Model, address: string) => m.by_project.flatMap((g) => g.agents).find((a) => a.address === address)!;
+  const later = new Date(Date.parse(NOW) + 5 * 60_000).toISOString();
+  const extend = { type: 'approval', approval_id: '01JAPPEXT', kind: 'extend', from: 'claude:harbor', to: 'grok:researcher', topic: 'competitor pricing pages', turn_limit: 40, expires_at: later, conversation_id: '01JSMALL1', answer_in: 'claude:harbor', answer_with: 'prompt' };
+  // the bridge reports both invites and extends as activity "approval" for the agent asked
+  const snap = small() as Snap;
+  snap.agents.find((a) => a['address'] === 'claude:harbor')!['activity'] = 'approval';
+  snap.needs_you = [extend];
+  const m = await model(snap);
+  assert.deepEqual([tagOf(m, 'claude:harbor').state, tagOf(m, 'claude:harbor').tag], ['needs_you', 'more turns?']);
+  assert.equal(m.needs_you[0]!.context.startsWith('more turns (to 40)'), true);
+
+  // an invite waiting on the same agent as well: "invited" wins (it's the one that needs a yes to start)
+  snap.needs_you = [extend, { ...extend, approval_id: '01JAPPINV', kind: 'accept', from: 'codex:ledgerly', to: 'claude:harbor', conversation_id: '01JINV', topic: 'shared auth client' }];
+  assert.equal(tagOf(await model(snap), 'claude:harbor').tag, 'invited');
 });

@@ -136,6 +136,18 @@ export class Store {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, m.id, m.conversation_id, m.seq, m.turn, m.from_id, m.to_id, m.kind, m.body, m.in_reply_to,
     m.reply_expected, m.notice_code, m.notice_severity, m.status, m.reason, m.replied_by, m.created_at);
   }
+  /**
+   * Who took each turn and when, the last `perConversation` turns of each conversation, oldest first. Selects only
+   * turn, sender and time (never `body`): this feeds `status --json`, which must carry no message text.
+   */
+  turnLog(conversationIds: readonly string[], perConversation: number): Array<{ conversation_id: string; turn: number; from_id: string; created_at: number }> {
+    if (!conversationIds.length) return [];
+    return this.db.all<{ conversation_id: string; turn: number; from_id: string; created_at: number }>(
+      `SELECT conversation_id, turn, from_id, created_at FROM (
+         SELECT conversation_id, turn, from_id, created_at, ROW_NUMBER() OVER (PARTITION BY conversation_id ORDER BY turn DESC, seq DESC) AS rn
+         FROM messages WHERE turn IS NOT NULL AND conversation_id IN (${conversationIds.map(() => '?').join(', ')})
+       ) WHERE rn <= ? ORDER BY conversation_id, turn`, ...conversationIds, perConversation);
+  }
   message(id: string): MessageRow | undefined { return this.db.get<MessageRow>('SELECT * FROM messages WHERE id = ?', id); }
   messages(conversationId: string, opts: { beforeSeq?: number; afterSeq?: number; limit?: number; kinds?: MessageKind[] } = {}): MessageRow[] {
     const where = ['conversation_id = ?']; const vals: Val[] = [conversationId];

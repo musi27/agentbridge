@@ -20,6 +20,8 @@ export interface WatchStatus {
     // 0.2.9+: ended-today rows, times and approval provenance (status --json)
     created_at?: string; ended_at?: string | null; end_reason?: string | null;
     approvals?: Array<{ kind: string; via: string; agent: string; at: string; turn_limit?: number }>;
+    // 0.2.9+: the last turns, who and when (no text), for the graph window's sequence view
+    turn_log?: Array<{ turn: number; from: string; at: string }>;
   }>;
   waiting_deliveries?: Array<{ participant: string; hold: string | null; count: number }>;
   recent_notices?: Array<{ at: string; title?: string; body?: string }>;
@@ -148,7 +150,15 @@ const ACTIVITY_TEXT: Record<AgentActivity, string> = {
   waiting_first_prompt: 'waiting for first prompt', approval: 'approval waiting', in_conversation: 'in conversation', unreachable: 'unreachable', live: 'live',
 };
 
-export interface RenderOptions { width?: number; color?: boolean; clock?: string }
+export interface RenderOptions {
+  width?: number; color?: boolean; clock?: string;
+  /**
+   * Fit the frame into this many lines (a terminal's height), so a short terminal never scrolls. Agents, then notices,
+   * then conversations are shortened from the end with a "+ N more" line; the header and WAITING ON YOU stay whole
+   * (cut only if they alone don't fit). Unset: every row.
+   */
+  height?: number;
+}
 
 /** View rows → terminal lines (no trailing newlines). Lines are cut to `width` columns. */
 export function renderPanel(v: PanelView, o: RenderOptions = {}): string[] {
@@ -184,36 +194,55 @@ export function renderPanel(v: PanelView, o: RenderOptions = {}): string[] {
   }
   line();
 
-  line('CONVERSATIONS', bold(blue('CONVERSATIONS')));
-  if (!v.conversations.length) line(h.complete ? ' none active' : ' (not available from this bridge)', dim(h.complete ? ' none active' : ' (not available from this bridge)'));
-  for (const cv of v.conversations) {
+  // The lower sections are built apart so they can be shortened to fit `height`.
+  type Line = [string, string];
+  const more = (n: number, what = 'more'): Line => { const t = `   + ${n} ${what}`; return [t, dim(t)]; };
+
+  const convTitle: Line = ['CONVERSATIONS', bold(blue('CONVERSATIONS'))];
+  const convEmpty: Line[] = v.conversations.length ? [] : [[h.complete ? ' none active' : ' (not available from this bridge)', dim(h.complete ? ' none active' : ' (not available from this bridge)')]];
+  const convItems: Line[][] = v.conversations.map((cv) => {
     const t = ` ◆ ${cv.a} ↔ ${cv.b}${cv.state === 'active' ? '' : cv.queued ? '   (invite queued)' : '   (invite pending)'}`;
-    line(t, `${blue(' ◆')}${t.slice(2)}`);
     const d = `   ${quote(cv.topic) || '(no topic)'}   ${cv.turnsUsed}/${cv.turnLimit} · ${ago(cv.agoS)}`;
-    line(d, `   ${quote(cv.topic) || '(no topic)'}   ${dim(`${cv.turnsUsed}/${cv.turnLimit} · ${ago(cv.agoS)}`)}`);
-  }
-  line();
+    return [[t, `${blue(' ◆')}${t.slice(2)}`], [d, `   ${quote(cv.topic) || '(no topic)'}   ${dim(`${cv.turnsUsed}/${cv.turnLimit} · ${ago(cv.agoS)}`)}`]];
+  });
 
   const addrW = Math.min(30, Math.max(14, ...v.agents.map((a) => a.address.length)));
   const head2 = `AGENTS${' '.repeat(addrW - 2)}mode            state`;
-  line(head2, `${bold(green('AGENTS'))}${dim(head2.slice(6))}`);
-  if (!v.agents.length) line(' no live agents', dim(' no live agents'));
-  for (const a of v.agents) {
+  const agentTitle: Line = [head2, `${bold(green('AGENTS'))}${dim(head2.slice(6))}`];
+  const agentEmpty: Line[] = v.agents.length ? [] : [[' no live agents', dim(' no live agents')]];
+  const agentRows: Line[] = v.agents.map((a) => {
     const dot = a.activity === 'live' || a.activity === 'in_conversation' ? green(' ●') : yellow(' ●');
     const t = ` ● ${a.address.padEnd(addrW)} ${a.mode.padEnd(15)} ${ACTIVITY_TEXT[a.activity]}${a.title ? `  ${quote(a.title)}` : ''}`;
-    line(t, `${dot}${t.slice(2)}`);
-  }
-  if (v.closedCount) line(`   + ${v.closedCount} closed`, dim(`   + ${v.closedCount} closed`));
-  line();
+    return [t, `${dot}${t.slice(2)}`];
+  });
+  const closed: Line[] = v.closedCount ? [more(v.closedCount, 'closed')] : [];
 
-  line('NOTICES', bold('NOTICES'));
-  if (!v.notices.length) line(' none', dim(' none'));
-  for (const n of v.notices) {
+  const noticeEmpty: Line[] = v.notices.length ? [] : [[' none', dim(' none')]];
+  const noticeRows: Line[] = v.notices.map((n) => {
     const t = ` ${ago(n.agoS).padEnd(9)} ${n.title}${n.body ? ` — ${n.body}` : ''}`;
-    line(t, `${dim(` ${ago(n.agoS).padEnd(9)}`)}${t.slice(10)}`);
+    return [t, `${dim(` ${ago(n.agoS).padEnd(9)}`)}${t.slice(10)}`];
+  });
+
+  // Shown rows per section; whatever is cut becomes one "+ N more" line.
+  const keep = { conv: convItems.length, agents: agentRows.length, notices: noticeRows.length };
+  const tail = (rows: Line[], k: number): Line[] => (k < rows.length ? [...rows.slice(0, k), more(rows.length - k)] : rows);
+  const lower = (): Line[] => [
+    convTitle, ...convEmpty, ...convItems.slice(0, keep.conv).flat(), ...(keep.conv < convItems.length ? [more(convItems.length - keep.conv)] : []), ['', ''],
+    agentTitle, ...agentEmpty, ...tail(agentRows, keep.agents), ...closed, ['', ''],
+    ['NOTICES', bold('NOTICES')], ...noticeEmpty, ...tail(noticeRows, keep.notices),
+  ];
+  let rows = [...out, ...lower()];
+  if (o.height !== undefined) {
+    const height = Math.max(1, o.height);
+    // agents first, then notices, then conversations, one row (or conversation) at a time
+    while (rows.length > height && (keep.agents > 0 || keep.notices > 0 || keep.conv > 0)) {
+      if (keep.agents > 0) keep.agents--; else if (keep.notices > 0) keep.notices--; else keep.conv--;
+      rows = [...out, ...lower()];
+    }
+    if (rows.length > height) rows = rows.slice(0, height); // header and WAITING ON YOU alone are too tall
   }
 
-  return out.map(([plain, styled]) => (plain.length <= width ? styled : cut(plain, width)));
+  return rows.map(([plain, styled]) => (plain.length <= width ? styled : cut(plain, width)));
 }
 
 /** Cut a plain line to `width` columns with an ellipsis (styling is dropped on cut lines). */

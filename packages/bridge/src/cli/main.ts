@@ -210,7 +210,7 @@ async function watchStatus(socket: string, o: { watch: boolean; json: boolean },
     return await runWatch({
       fetch, cliVersion: BRIDGE_VERSION, color: !process.env['NO_COLOR'],
       out: tty
-        ? { isTTY: true, get columns() { return process.stdout.columns; }, write: (x) => { process.stdout.write(x); }, onResize: (fn) => { process.stdout.on('resize', fn); } }
+        ? { isTTY: true, get columns() { return process.stdout.columns; }, get rows() { return process.stdout.rows; }, write: (x) => { process.stdout.write(x); }, onResize: (fn) => { process.stdout.on('resize', fn); } }
         : { isTTY: false, write: (x) => { print(x.replace(/\n$/, '')); } },
     });
   } finally { (client as IpcClient | null)?.close(); }

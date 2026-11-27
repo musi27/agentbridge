@@ -45,6 +45,7 @@ test('status json: schema shape and stable ordering from a status snapshot', () 
     id: '01JCONVENDED', from: 'claude:agentbridge', to: 'claude:old-docs', topic: 'changelog wording', state: 'ended', end_reason: 'ended_by_participant',
     turns: { used: 4, limit: 10 }, origin: 'local', queued: false, started_at: new Date(NOW - 3_000_000).toISOString(), ended_at: new Date(NOW - 2_400_000).toISOString(), last_activity_at: new Date(NOW - 2_400_000).toISOString(),
     approvals: [{ kind: 'start', via: 'prompt', agent: 'claude:agentbridge', at: new Date(NOW - 2_990_000).toISOString() }, { kind: 'accept', via: 'cli', agent: 'claude:old-docs', at: new Date(NOW - 2_900_000).toISOString() }],
+    turn_log: [],  // the snapshot came from a bridge without it
   });
   assert.match(j.notices[0]!.title, /message waiting/); // newest first
   // stable: the same state gives byte-identical output, whatever the input order
@@ -208,6 +209,20 @@ test('status --json over ipc: projects by git root, approval provenance, and nev
     const first = j.conversations.find((x) => x.topic === 'checkout copy')!;
     assert.deepEqual(first.approvals.map((x) => [x.kind, x.via, x.agent]), [['start', 'prompt', 'claude:web'], ['accept', 'prompt', 'claude:shop-feat']]);
     assert.deepEqual(first.turns, { used: 2, limit: 6 });
+    // who took each turn and when, for the graph window's sequence view: no text
+    assert.deepEqual(first.turn_log.map((t) => [t.turn, t.from]), [[1, 'claude:web'], [2, 'claude:shop-feat']]);
+    for (const t of first.turn_log) { assert.deepEqual(Object.keys(t).sort(), ['at', 'from', 'turn']); assert.ok(!Number.isNaN(Date.parse(t.at))); }
+    // a long conversation: only the last 50 turns are listed, and none of the bodies get in
+    const seed = h.svc.store.messages(first.id).find((m) => m.turn === 2)!;
+    for (let turn = 3; turn <= 60; turn++) {
+      h.svc.store.insertMessage({ ...seed, id: `seeded-${turn}`, seq: 100 + turn, turn, body: `CANARY-BULK-${turn} long message text`, created_at: seed.created_at + turn * 1000 });
+    }
+    const outLong: string[] = [];
+    await main(['status', '--json', '--home', h.root], (s) => outLong.push(s), () => {});
+    const longText = outLong.join('\n');
+    assert.ok(!longText.includes('CANARY'), 'turn_log leaked a message body');
+    const long = (JSON.parse(longText) as StatusSnapshot).conversations.find((x) => x.id === first.id)!;
+    assert.deepEqual([long.turn_log.length, long.turn_log[0]!.turn, long.turn_log.at(-1)!.turn], [50, 11, 60]);
     const second = j.conversations.find((x) => x.topic === 'notes')!;
     assert.deepEqual(second.approvals.map((x) => [x.kind, x.via, x.agent]), [['start', 'prompt', 'claude:scratch'], ['accept', 'cli', 'claude:shop-feat']]);
     // ended today stays listed, with its end time

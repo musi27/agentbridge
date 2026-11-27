@@ -21,7 +21,7 @@ function copySources(): string {
 }
 
 test('sources hash covers every helper source and changes with any of them', () => {
-  assert.deepEqual(SOURCE_FILES, ['native/main.swift', 'native/PanelModel.swift', 'native/PanelApp.swift', 'native/Info.plist', 'native/AppIcon.icns', 'native/build.sh']);
+  assert.deepEqual(SOURCE_FILES, ['native/main.swift', 'native/PanelModel.swift', 'native/GraphModel.swift', 'native/PanelApp.swift', 'native/GraphWindow.swift', 'native/Info.plist', 'native/AppIcon.icns', 'native/build.sh']);
   // build.sh compiles exactly the Swift files the manifest covers, and every .swift file in native/ is one of them
   const build = readFileSync(join(PRESENCE_DIR, 'native', 'build.sh'), 'utf8');
   const compiled = [.../swift_files="([^"]+)"/.exec(build)![1]!.matchAll(/\$here\/(\S+\.swift)/g)].map((m) => `native/${m[1]}`);
